@@ -32,7 +32,7 @@ export interface Filters {
   addressConfidenceMax: string;
 }
 
-const defaultFilters: Filters = {
+export const defaultLeadFilters: Filters = {
   source: "all",
   leadType: "all",
   priorityTier: "all",
@@ -68,7 +68,7 @@ export const useDashboard = (
   const [bookingLinkConfigured, setBookingLinkConfigured] = useState(initialBookingLinkConfigured);
   const [bookingLinkDisplay, setBookingLinkDisplay] = useState(initialBookingLinkDisplay);
   const [bookingReplyPreview, setBookingReplyPreview] = useState(initialBookingReplyPreview);
-  const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [filters, setFilters] = useState<Filters>(defaultLeadFilters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
 

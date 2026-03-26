@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { appConfig } from "@/config/appConfig";
 import { ImportSummary } from "@/data/importLeads";
-import { useDashboard } from "@/hooks/useDashboard";
+import { defaultLeadFilters, useDashboard } from "@/hooks/useDashboard";
 import {
   ADDRESS_CONFIDENCE_TOOLTIP,
   AddressConfidenceBadge
@@ -323,6 +323,57 @@ export function DashboardApp({
     initialBookingLinkDisplay,
     initialBookingReplyPreview
   );
+
+  type LeadStatFilterAction =
+    | "reset"
+    | "source_csv"
+    | "source_external"
+    | "status_booking_sent"
+    | "status_booked"
+    | "addr_86"
+    | "addr_71"
+    | "addr_lt71"
+    | "addr_very_poor";
+
+  const applyLeadStatFilter = useCallback(
+    (action: LeadStatFilterAction) => {
+      switch (action) {
+        case "reset":
+          vm.setFilters(() => ({ ...defaultLeadFilters }));
+          break;
+        case "source_csv":
+          vm.setFilters(() => ({ ...defaultLeadFilters, source: "CSV Import" }));
+          break;
+        case "source_external":
+          vm.setFilters(() => ({ ...defaultLeadFilters, source: "Scraped / External" }));
+          break;
+        case "status_booking_sent":
+          vm.setFilters(() => ({ ...defaultLeadFilters, status: "Booking Sent" }));
+          break;
+        case "status_booked":
+          vm.setFilters(() => ({ ...defaultLeadFilters, status: "Booked" }));
+          break;
+        case "addr_86":
+          vm.setFilters(() => ({ ...defaultLeadFilters, addressQuick: "verified_86" }));
+          break;
+        case "addr_71":
+          vm.setFilters(() => ({ ...defaultLeadFilters, addressQuick: "reachable_71" }));
+          break;
+        case "addr_lt71":
+          vm.setFilters(() => ({ ...defaultLeadFilters, addressQuick: "needs_review_under_71" }));
+          break;
+        case "addr_very_poor":
+          vm.setFilters(() => ({
+            ...defaultLeadFilters,
+            addressConfidenceMin: "0",
+            addressConfidenceMax: String(OUTREACH_ADDRESS_VERY_POOR_MAX)
+          }));
+          break;
+      }
+    },
+    [vm.setFilters]
+  );
+
   const [simulationLeadId, setSimulationLeadId] = useState<string | null>(() => initialLeads[0]?.id ?? null);
   const [simReplyDraft, setSimReplyDraft] = useState("");
 
@@ -596,31 +647,54 @@ export function DashboardApp({
 
           {activeView === "leads" && (
             <section className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-11">
-              {[
-                ["Total Leads", vm.metrics.totalLeads],
-                ["Qualified", vm.metrics.qualifiedLeads],
-                ["CSV Leads", vm.metrics.csvLeads],
-                ["External", vm.metrics.externalLeads],
-                ["Online Enriched", vm.metrics.enrichedLeads],
-                ["Campaigns", vm.metrics.campaignsLaunched],
-                ["Emails Sent", vm.metrics.emailsSent],
-                ["Replies", vm.metrics.replies],
-                ["Positive Replies", vm.metrics.positiveReplies],
-                ["Booking Sent", vm.metrics.bookingSent],
-                ["Booked", vm.metrics.booked],
-                ["Addr score 86+", vm.addressMetrics.verified],
-                ["Addr score 71+", vm.addressMetrics.good],
-                ["Addr &lt;71 (review)", vm.addressMetrics.low],
-                ["Addr ≤10 (very poor)", vm.addressMetrics.veryPoor]
-              ].map(([label, value]) => (
-                <div
-                  key={label}
-                  className="rounded-md border border-slate-200 bg-white px-1.5 py-1 shadow-sm"
-                >
-                  <p className="line-clamp-2 text-[10px] leading-tight text-slate-500">{label}</p>
-                  <p className="text-sm font-bold tabular-nums leading-tight text-slate-900">{value}</p>
-                </div>
-              ))}
+              {(
+                [
+                  { label: "Total Leads", value: vm.metrics.totalLeads, filter: "reset" as const },
+                  { label: "Qualified", value: vm.metrics.qualifiedLeads, filter: null },
+                  { label: "CSV Leads", value: vm.metrics.csvLeads, filter: "source_csv" as const },
+                  { label: "External", value: vm.metrics.externalLeads, filter: "source_external" as const },
+                  { label: "Online Enriched", value: vm.metrics.enrichedLeads, filter: null },
+                  { label: "Campaigns", value: vm.metrics.campaignsLaunched, filter: null },
+                  { label: "Emails Sent", value: vm.metrics.emailsSent, filter: null },
+                  { label: "Replies", value: vm.metrics.replies, filter: null },
+                  { label: "Positive Replies", value: vm.metrics.positiveReplies, filter: null },
+                  { label: "Booking Sent", value: vm.metrics.bookingSent, filter: "status_booking_sent" as const },
+                  { label: "Booked", value: vm.metrics.booked, filter: "status_booked" as const },
+                  { label: "Addr score 86+", value: vm.addressMetrics.verified, filter: "addr_86" as const },
+                  { label: "Addr score 71+", value: vm.addressMetrics.good, filter: "addr_71" as const },
+                  { label: "Addr <71 (review)", value: vm.addressMetrics.low, filter: "addr_lt71" as const },
+                  { label: "Addr ≤10 (very poor)", value: vm.addressMetrics.veryPoor, filter: "addr_very_poor" as const }
+                ] as const
+              ).map(({ label, value, filter }) => {
+                const interactive = filter !== null;
+                const inner = (
+                  <>
+                    <p className="line-clamp-2 text-[10px] leading-tight text-slate-500">{label}</p>
+                    <p className="text-sm font-bold tabular-nums leading-tight text-slate-900">{value}</p>
+                  </>
+                );
+                const boxClass =
+                  "rounded-md border border-slate-200 bg-white px-1.5 py-1 text-left shadow-sm transition-colors" +
+                  (interactive ? " cursor-pointer hover:border-slate-400 hover:bg-slate-50" : "");
+                if (!interactive) {
+                  return (
+                    <div key={label} className={boxClass}>
+                      {inner}
+                    </div>
+                  );
+                }
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    className={boxClass}
+                    title="Apply matching filters to the lead library below"
+                    onClick={() => applyLeadStatFilter(filter)}
+                  >
+                    {inner}
+                  </button>
+                );
+              })}
             </section>
           )}
           {activeView === "leads" && (
