@@ -5,7 +5,7 @@ export default function CalSetupPage() {
   return (
     <main className="mx-auto max-w-2xl p-8 text-slate-800">
       <p className="mb-2 text-sm text-slate-500">
-        <Link href="/" className="text-brand underline">
+        <Link href="/dashboard" className="text-brand underline">
           ← Dashboard
         </Link>
       </p>
