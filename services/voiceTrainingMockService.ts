@@ -8,7 +8,8 @@ import type { Lead } from "@/types/lead";
 
 export { VOICE_TRAIN_SCENARIOS, type VoiceTrainScenarioKind } from "@/config/voiceTrainScenarios";
 
-const MOCK_LEAD: Lead = {
+/** Used when no `leadId` is passed (empty DB / API without picker). */
+export const VOICE_TRAIN_FALLBACK_LEAD: Lead = {
   id: "voice-train-mock",
   firstName: "Alex",
   lastName: "Rivera",
@@ -46,15 +47,19 @@ const MOCK_LEAD: Lead = {
   tags: []
 };
 
-const FIRST_TOUCH_STUB = `Hi Alex — [example first touch about custom millwork; soft CTA, no link]`;
+function firstTouchStubForLead(lead: Lead): string {
+  const name = lead.firstName?.trim() || "there";
+  return `Hi ${name} — [example first touch about custom millwork; soft CTA, no link]`;
+}
 
-function userPromptForScenario(kind: VoiceTrainScenarioKind): string {
-  const ctx = formatFullLeadContextForClaude(MOCK_LEAD);
+function userPromptForScenario(kind: VoiceTrainScenarioKind, lead: Lead): string {
+  const ctx = formatFullLeadContextForClaude(lead);
+  const stub = firstTouchStubForLead(lead);
   switch (kind) {
     case "first_touch":
       return `${ctx}\n\nWrite a cold first-touch email body for this lead. No booking URL or http links — soft CTA only. Under ~200 words.`;
     case "follow_up_1":
-      return `${ctx}\n\nWe already sent this first touch:\n---\n${FIRST_TOUCH_STUB}\n---\n\nWrite follow-up #1 (gentle bump). May use {{BOOKING_LINK}} once at end if appropriate. Under ~140 words.`;
+      return `${ctx}\n\nWe already sent this first touch:\n---\n${stub}\n---\n\nWrite follow-up #1 (gentle bump). May use {{BOOKING_LINK}} once at end if appropriate. Under ~140 words.`;
     case "follow_up_2":
       return `${ctx}\n\nWrite the final "breakup" follow-up — respectful last touch. Optional {{BOOKING_LINK}} once. Under ~130 words.`;
     case "reply_pricing":
@@ -71,9 +76,10 @@ function userPromptForScenario(kind: VoiceTrainScenarioKind): string {
 }
 
 const TASK_RULES = `You write plain-text email body copy only (no subject line, no markdown).
-When a scheduling URL is needed, use the token {{BOOKING_LINK}} once — never invent URLs.`;
+When a scheduling URL is needed, use the token {{BOOKING_LINK}} once — never invent URLs.
+Only reference facts implied by the lead record (source, notes, etc.); do not invent portfolio or third-party claims not supported by the data.`;
 
-export async function generateVoiceTrainingMock(kind: VoiceTrainScenarioKind): Promise<string | null> {
+export async function generateVoiceTrainingMock(kind: VoiceTrainScenarioKind, lead: Lead): Promise<string | null> {
   if (!isClaudeCopyConfigured()) return null;
   if (!(VOICE_TRAIN_SCENARIOS as readonly string[]).includes(kind)) return null;
 
@@ -84,7 +90,7 @@ export async function generateVoiceTrainingMock(kind: VoiceTrainScenarioKind): P
       model: claudeModelId(),
       max_tokens: 1200,
       system,
-      messages: [{ role: "user", content: userPromptForScenario(kind) }]
+      messages: [{ role: "user", content: userPromptForScenario(kind, lead) }]
     });
     const block = msg.content.find((b): b is Anthropic.TextBlock => b.type === "text");
     return block?.text?.trim() ?? null;

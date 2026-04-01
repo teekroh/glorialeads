@@ -2064,6 +2064,7 @@ export function DashboardApp({
           )}
           {activeView === "train" && (
             <VoiceTrainTab
+              leads={vm.leads}
               notes={vm.voiceTrainingNotes}
               onRefresh={vm.refresh}
               generateMock={vm.generateVoiceTrainingMockClient}

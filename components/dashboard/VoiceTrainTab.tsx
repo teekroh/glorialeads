@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { VOICE_TRAIN_SCENARIOS, type VoiceTrainScenarioKind } from "@/config/voiceTrainScenarios";
 import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
+import type { Lead } from "@/types/lead";
 
 const SCENARIO_LABELS: Record<VoiceTrainScenarioKind, string> = {
   first_touch: "Cold first touch",
@@ -15,14 +16,16 @@ const SCENARIO_LABELS: Record<VoiceTrainScenarioKind, string> = {
 };
 
 export function VoiceTrainTab({
+  leads,
   notes,
   onRefresh,
   generateMock,
   saveNote
 }: {
+  leads: Lead[];
   notes: VoiceTrainingNoteDTO[];
   onRefresh: () => Promise<void>;
-  generateMock: (kind: VoiceTrainScenarioKind) => Promise<{ ok: boolean; mock?: string; error?: string }>;
+  generateMock: (kind: VoiceTrainScenarioKind, leadId: string) => Promise<{ ok: boolean; mock?: string; error?: string }>;
   saveNote: (input: {
     scenarioKind: string;
     mockClaudeReply: string;
@@ -35,6 +38,25 @@ export function VoiceTrainTab({
   const [busy, setBusy] = useState<"gen" | "save" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  /** Top-scoring leads that are not suppressed (same idea as “best” for outreach). */
+  const trainLeadOptions = useMemo(
+    () =>
+      [...leads]
+        .filter((l) => !l.doNotContact)
+        .sort((a, b) => b.score - a.score || (a.fullName || "").localeCompare(b.fullName || ""))
+        .slice(0, 80),
+    [leads]
+  );
+
+  const [selectedLeadId, setSelectedLeadId] = useState<string>("");
+
+  useEffect(() => {
+    setSelectedLeadId((prev) => {
+      if (prev && trainLeadOptions.some((l) => l.id === prev)) return prev;
+      return trainLeadOptions[0]?.id ?? "";
+    });
+  }, [trainLeadOptions]);
+
   const scenarioOptions = useMemo(
     () => VOICE_TRAIN_SCENARIOS.map((k) => ({ value: k, label: SCENARIO_LABELS[k] })),
     []
@@ -43,7 +65,7 @@ export function VoiceTrainTab({
   const onGenerate = useCallback(async () => {
     setBusy("gen");
     setNotice(null);
-    const r = await generateMock(scenario);
+    const r = await generateMock(scenario, selectedLeadId);
     setBusy(null);
     if (r.ok && r.mock) {
       setMock(r.mock);
@@ -51,7 +73,7 @@ export function VoiceTrainTab({
     } else {
       setNotice(r.error ?? "Could not generate (check ANTHROPIC_API_KEY and production admin key).");
     }
-  }, [generateMock, scenario]);
+  }, [generateMock, scenario, selectedLeadId]);
 
   const onSave = useCallback(async () => {
     setBusy("save");
@@ -76,13 +98,38 @@ export function VoiceTrainTab({
       <div className="card space-y-2">
         <h2 className="text-lg font-semibold text-brand-ink">Train voice</h2>
         <p className="text-sm text-slate-600">
-          Generate sample copy for a scenario, then write what you would do differently. Saved notes are appended to Claude&apos;s system prompt on real
-          outbound and inbound drafts (most recent first).
+          Pick one of your highest-scoring leads (not on DNC) so the mock uses real CRM fields. Generate sample copy for a scenario, then note what you
+          would do differently. Saved notes are appended to Claude&apos;s system prompt on real outbound and inbound drafts (most recent first).
         </p>
       </div>
 
       <div className="card grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
+          <label className="block text-sm font-medium text-brand-ink" htmlFor="train-lead">
+            CRM lead for mock (top {trainLeadOptions.length} by score, excluding DNC)
+          </label>
+          <select
+            id="train-lead"
+            className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm"
+            value={selectedLeadId}
+            onChange={(e) => {
+              setSelectedLeadId(e.target.value);
+              setNotice(null);
+            }}
+          >
+            {trainLeadOptions.length === 0 ? (
+              <option value="">No eligible leads — built-in sample only</option>
+            ) : (
+              <>
+                {trainLeadOptions.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.fullName} · score {l.score} · {l.city}, {l.state} · {l.leadType}
+                  </option>
+                ))}
+                <option value="">— Built-in sample (not in your DB) —</option>
+              </>
+            )}
+          </select>
           <label className="block text-sm font-medium text-brand-ink" htmlFor="train-scenario">
             Scenario
           </label>

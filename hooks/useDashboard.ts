@@ -338,15 +338,24 @@ export const useDashboard = (
     ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
   };
 
-  const generateVoiceTrainingMockClient = async (kind: VoiceTrainScenarioKind) => {
+  const generateVoiceTrainingMockClient = async (kind: VoiceTrainScenarioKind, leadId: string) => {
     const res = await fetch("/api/voice-training/generate-mock", {
       method: "POST",
       headers: voiceTrainingAuthHeaders,
-      body: JSON.stringify({ kind })
+      body: JSON.stringify({ kind, leadId: leadId.trim() || undefined })
     });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; mock?: string; error?: string };
     if (!res.ok || !data.ok) {
-      return { ok: false as const, error: data.error ?? (res.status === 401 ? "Unauthorized (set ADMIN_API_KEY)" : "request_failed") };
+      return {
+        ok: false as const,
+        error:
+          data.error ??
+          (res.status === 401
+            ? "Unauthorized (set ADMIN_API_KEY)"
+            : res.status === 404
+              ? "Lead not found."
+              : "request_failed")
+      };
     }
     return { ok: true as const, mock: data.mock ?? "" };
   };
