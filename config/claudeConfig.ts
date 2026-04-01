@@ -2,11 +2,12 @@
  * Claude (Anthropic) for outbound + inbound email copy. Server-side only.
  *
  * ANTHROPIC_API_KEY — required to enable AI copy.
- * ANTHROPIC_MODEL — optional; defaults to a broadly supported Sonnet ID.
+ * ANTHROPIC_MODEL — optional; overrides default (see Anthropic models docs).
  * CLAUDE_COPY_DISABLED=true — keep key installed but force template-only copy.
  */
 
-export const CLAUDE_DEFAULT_MODEL = "claude-3-5-sonnet-20241022";
+/** Default when ANTHROPIC_MODEL is unset. Older IDs (e.g. claude-3-5-sonnet-20241022) may 404 on the API. */
+export const CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
 export function anthropicApiKey(): string {
   return process.env.ANTHROPIC_API_KEY?.trim() ?? "";
