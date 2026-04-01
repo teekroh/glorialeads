@@ -99,14 +99,30 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
     return `https://www.google.com/search?q=${encodeURIComponent(buildReviewQuery(current))}`;
   }, [current]);
 
-  const skipUnknown = async () => {
+  const applyUnknownPenalty = async () => {
     if (!current || busy) return;
     setBusy(true);
     setSlide("out");
     await new Promise((r) => setTimeout(r, 180));
-    setQueue((prev) => (prev.length > 1 ? [...prev.slice(1), prev[0]] : prev));
-    setSlide("in");
-    setBusy(false);
+    try {
+      const res = await fetch(`/api/leads/${current.id}/verify-decision`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verdict: "unknown" })
+      });
+      if (!res.ok) {
+        window.alert("Could not save uncertain verdict.");
+        setSlide("in");
+        setBusy(false);
+        return;
+      }
+      setQueue((prev) => prev.slice(1));
+      setSlide("in");
+      await onRefresh();
+      await loadQueue();
+    } finally {
+      setBusy(false);
+    }
   };
 
   const fireDecision = async (verdict: "approved" | "rejected") => {
@@ -148,8 +164,9 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
       <header className="rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-lg font-semibold text-brand-ink">Pre-deploy verify</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Score <strong>≥ {stats?.minScore ?? DEPLOY_VERIFY_MIN_SCORE}</strong> leads must be approved here before they can be included in a campaign send
-          (unless you check the launch override on the Leads tab). Use the search panel to sanity-check the person and location, then thumbs up or down.
+          Score <strong>≥ {stats?.minScore ?? DEPLOY_VERIFY_MIN_SCORE}</strong> leads need a human check before they count as <strong>outreach-ready</strong> for
+          campaigns: <strong>Approve for send</strong> marks them cleared to include when you launch — it does <strong>not</strong> auto-send email. Reject bins
+          obvious bad leads. Uncertain applies a score penalty without rejecting (see below).
         </p>
         {stats ? (
           <>
@@ -302,6 +319,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
               type="button"
               disabled={busy}
               onClick={() => void fireDecision("approved")}
+              title="Outreach readiness: include in campaign audiences when you launch. No automatic email is sent from this action alone."
               className="flex min-w-[200px] items-center justify-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-8 py-4 text-base font-semibold text-emerald-950 hover:bg-emerald-100 disabled:opacity-50"
             >
               <span className="text-2xl" aria-hidden>
@@ -311,15 +329,15 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
             </button>
             <button
               type="button"
-              disabled={busy || queue.length <= 1}
-              onClick={() => void skipUnknown()}
+              disabled={busy}
+              onClick={() => void applyUnknownPenalty()}
               className="flex min-w-[200px] items-center justify-center gap-2 rounded-xl border-2 border-brand/40 bg-brand/5 px-8 py-4 text-base font-semibold text-brand-ink hover:bg-brand/12 disabled:opacity-50"
-              title={queue.length <= 1 ? "Nothing to skip to." : "Move this lead to the back of the carousel without saving a verdict."}
+              title="Not a full reject: applies a score penalty and leaves Verify unset so the lead can re-enter when score recovers."
             >
               <span className="text-2xl" aria-hidden>
                 ?
               </span>
-              Unknown (skip)
+              Unknown (−score)
             </button>
             <button
               type="button"

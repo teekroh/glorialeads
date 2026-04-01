@@ -88,3 +88,11 @@ export function scoreLeadBase(lead: Pick<Lead, "distanceMinutes" | "amountSpent"
   const priorityTier: PriorityTier = score >= 75 ? "Tier A" : score >= 55 ? "Tier B" : score >= 38 ? "Tier C" : "Tier D";
   return { score, conversionScore, projectFitScore, priorityTier, estimatedProjectTier: tier, breakdown };
 }
+
+/**
+ * Pre-outreach pipeline status from fit tier. Matches dashboard "Qualified" metric (Tier A / B).
+ * "In Campaign" and later stages are set only when messaging runs; see `launchCampaign`.
+ */
+export function pipelineStatusForTier(priorityTier: PriorityTier): "New" | "Qualified" {
+  return priorityTier === "Tier A" || priorityTier === "Tier B" ? "Qualified" : "New";
+}

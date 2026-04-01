@@ -268,7 +268,10 @@ export const useDashboard = (
     const end = new Date(start.getTime() + 15 * 60 * 1000);
     const res = await fetch("/api/webhooks/cal-booking", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
+      },
       body: JSON.stringify({
         leadId,
         bookingUid: `selftest-${Date.now()}`,

@@ -3,7 +3,7 @@ import path from "node:path";
 import { parseCsv } from "@/lib/csv";
 import { getCsvColumn } from "@/lib/csvColumns";
 import { uid, asNum } from "@/lib/utils";
-import { scoreLeadBase } from "@/services/scoringService";
+import { pipelineStatusForTier, scoreLeadBase } from "@/services/scoringService";
 import { estimateDistanceMinutes } from "@/services/distanceService";
 import { Lead, LeadType } from "@/types/lead";
 
@@ -147,7 +147,7 @@ export const importCsvLeads = (): { leads: Lead[]; summary: ImportSummary } => {
       projectFitScore: scored.projectFitScore,
       estimatedProjectTier: scored.estimatedProjectTier,
       priorityTier: scored.priorityTier,
-      status: "New",
+      status: pipelineStatusForTier(scored.priorityTier),
       doNotContact: false,
       createdAt: now,
       updatedAt: now,

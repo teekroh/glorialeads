@@ -94,21 +94,28 @@ function leadNeedsInboxReview(lead: Lead) {
 }
 
 function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
+  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
+
   const events = useMemo(() => {
-    const out: { at: Date; leadName: string; status: string }[] = [];
+    const out: { at: Date; leadName: string; status: string; hasScheduledStart: boolean }[] = [];
     for (const lead of leads) {
       for (const b of lead.bookingHistory) {
-        if (b.meetingStart) {
-          out.push({ at: new Date(b.meetingStart), leadName: lead.fullName, status: b.status || "—" });
-        }
+        const anchor = bookingCalendarAnchor(b);
+        if (!anchor) continue;
+        out.push({
+          at: anchor,
+          leadName: lead.fullName,
+          status: b.status || "—",
+          hasScheduledStart: bookingHasScheduledStart(b)
+        });
       }
     }
     return out.sort((a, b) => a.at.getTime() - b.at.getTime());
   }, [leads]);
 
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
+  const y = viewYear;
+  const m = viewMonth;
   const first = new Date(y, m, 1);
   const pad = first.getDay();
   const daysInMonth = new Date(y, m + 1, 0).getDate();
@@ -119,12 +126,60 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
     return { day, items };
   });
 
-  const monthLabel = now.toLocaleString("default", { month: "long", year: "numeric" });
+  const monthLabel = new Date(y, m, 15).toLocaleString("default", { month: "long", year: "numeric" });
+  const goPrev = () => {
+    if (m === 0) {
+      setViewMonth(11);
+      setViewYear((yy) => yy - 1);
+    } else setViewMonth(m - 1);
+  };
+  const goNext = () => {
+    if (m === 11) {
+      setViewMonth(0);
+      setViewYear((yy) => yy + 1);
+    } else setViewMonth(m + 1);
+  };
+  const goToday = () => {
+    const d = new Date();
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+  };
 
   return (
     <section className="card mt-4">
-      <h3 className="text-base font-semibold text-brand-ink">Bookings calendar · {monthLabel}</h3>
-      <p className="mt-1 text-xs text-slate-600">Meetings with a scheduled start time from booking records.</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-base font-semibold text-brand-ink">Bookings calendar · {monthLabel}</h3>
+          <p className="mt-1 text-xs text-slate-600">
+            Scheduled meeting time when Cal provides it; otherwise the day the invite or confirmation was recorded.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={goPrev}
+            className="rounded border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-brand-ink hover:bg-slate-50"
+            aria-label="Previous month"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            onClick={goToday}
+            className="rounded border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-brand-ink hover:bg-slate-50"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            className="rounded border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-brand-ink hover:bg-slate-50"
+            aria-label="Next month"
+          >
+            →
+          </button>
+        </div>
+      </div>
       <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-medium uppercase text-slate-500">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
           <div key={d} className="py-1">
@@ -142,7 +197,8 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
               <span className="font-semibold text-brand-ink/90">{cell.day}</span>
               {cell.items.slice(0, 2).map((e, j) => (
                 <p key={j} className="mt-1 truncate text-[10px] text-slate-700" title={`${e.leadName} · ${e.status}`}>
-                  {e.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} {e.leadName.split(" ")[0]}
+                  {e.hasScheduledStart ? e.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Invite"}{" "}
+                  {e.leadName.split(" ")[0]}
                 </p>
               ))}
               {cell.items.length > 2 ? <p className="text-[10px] text-slate-500">+{cell.items.length - 2} more</p> : null}
@@ -150,7 +206,56 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
           )
         )}
       </div>
-      {!events.length ? <p className="mt-3 text-sm text-slate-500">No dated meetings on record this month.</p> : null}
+      {!events.length ? <p className="mt-3 text-sm text-slate-500">No booking activity with a date in {monthLabel}.</p> : null}
+    </section>
+  );
+}
+
+function Phase3IntelligenceCard({ metrics }: { metrics: Phase3Metrics }) {
+  return (
+    <section className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+      <p className="mb-2 text-sm font-semibold text-brand-ink/90">Phase 3 · Reply &amp; booking intelligence</p>
+      <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
+        {[
+          ["Inbound replies", metrics.repliesReceived],
+          ["Positive / link asks", metrics.positiveReplies],
+          ["Booking invites sent", metrics.bookingInvitesSent],
+          ["Booked meetings", metrics.bookedMeetings],
+          ["Not interested", metrics.notInterested],
+          ["Suppressed", metrics.unsubscribes]
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+            <p className="text-[11px] text-slate-500">{label}</p>
+            <p className="text-lg font-semibold">{value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="text-xs text-slate-600">
+          <p className="font-medium text-brand-ink/90">Reply rate by source</p>
+          {Object.entries(metrics.replyRateBySource).map(([k, v]) => (
+            <p key={k}>
+              {k}: {v.replied}/{v.contacted} replied
+            </p>
+          ))}
+        </div>
+        <div className="text-xs text-slate-600">
+          <p className="font-medium text-brand-ink/90">Reply rate by lead type</p>
+          {Object.entries(metrics.replyRateByLeadType).map(([k, v]) => (
+            <p key={k}>
+              {k}: {v.replied}/{v.contacted}
+            </p>
+          ))}
+        </div>
+        <div className="text-xs text-slate-600">
+          <p className="font-medium text-brand-ink/90">Booking rate by priority tier</p>
+          {Object.entries(metrics.bookingRateByTier).map(([k, v]) => (
+            <p key={k}>
+              {k}: {v.booked}/{v.eligible} booked
+            </p>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -174,6 +279,187 @@ function classifyBookingInvite(
   if (st === "cancelled" || ms.includes("cancel") || st.includes("deny") || ms.includes("deny")) return "closed";
   if (st === "booked" || st.includes("confirm") || lead.status === "Booked") return "accepted";
   return "waiting";
+}
+
+type BookingHistRow = NonNullable<Lead["bookingHistory"]>[number];
+
+/** Day placement: Cal start &gt; confirmation time &gt; record created (invite sent). */
+function bookingCalendarAnchor(b: BookingHistRow): Date | null {
+  for (const raw of [b.meetingStart, b.bookedAt, b.at]) {
+    if (raw == null || (typeof raw === "string" && !raw.trim())) continue;
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+function bookingHasScheduledStart(b: BookingHistRow): boolean {
+  if (!b.meetingStart?.trim()) return false;
+  const d = new Date(b.meetingStart);
+  return !Number.isNaN(d.getTime());
+}
+
+type BookingInviteRow = {
+  lead: Lead;
+  b: NonNullable<Lead["bookingHistory"]>[number];
+  bucket: ReturnType<typeof classifyBookingInvite>;
+};
+
+function BookingsPageCalendar({
+  rows,
+  onSelect
+}: {
+  rows: BookingInviteRow[];
+  onSelect: (row: BookingInviteRow) => void;
+}) {
+  type Ev = BookingInviteRow & { at: Date; key: string };
+  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
+
+  const events = useMemo(() => {
+    const out: Ev[] = [];
+    rows.forEach((row, i) => {
+      const anchor = bookingCalendarAnchor(row.b);
+      if (!anchor) return;
+      out.push({ ...row, at: anchor, key: `${row.lead.id}-${row.b.at}-${i}` });
+    });
+    return out.sort((a, b) => a.at.getTime() - b.at.getTime());
+  }, [rows]);
+
+  const y = viewYear;
+  const m = viewMonth;
+  const first = new Date(y, m, 1);
+  const pad = first.getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const dayCells = Array.from({ length: pad + daysInMonth }, (_, i) => {
+    if (i < pad) return { day: null as number | null, items: [] as Ev[] };
+    const day = i - pad + 1;
+    const items = events.filter((e) => e.at.getFullYear() === y && e.at.getMonth() === m && e.at.getDate() === day);
+    return { day, items };
+  });
+
+  const monthLabel = new Date(y, m, 15).toLocaleString("default", { month: "long", year: "numeric" });
+
+  const goPrev = () => {
+    if (m === 0) {
+      setViewMonth(11);
+      setViewYear((yy) => yy - 1);
+    } else setViewMonth(m - 1);
+  };
+  const goNext = () => {
+    if (m === 11) {
+      setViewMonth(0);
+      setViewYear((yy) => yy + 1);
+    } else setViewMonth(m + 1);
+  };
+  const goToday = () => {
+    const d = new Date();
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+  };
+
+  const chipTimeLabel = (e: Ev) => {
+    if (bookingHasScheduledStart(e.b)) {
+      return new Date(e.b.meetingStart!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+    if (e.bucket === "waiting") return "Invite out";
+    return e.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  };
+
+  const chipClass = (bucket: BookingInviteRow["bucket"]) =>
+    bucket === "accepted"
+      ? "border-emerald-200 bg-emerald-50/90 text-emerald-950"
+      : bucket === "waiting"
+        ? "border-amber-200 bg-amber-50/90 text-amber-950"
+        : "border-slate-200 bg-slate-100/90 text-slate-700";
+
+  return (
+    <section className="card">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-base font-semibold text-brand-ink">Live calendar</h3>
+          <p className="mt-1 text-xs text-slate-600">
+            Uses the real meeting start from Cal when present; otherwise the confirmation or invite timestamp for day placement. Click an entry for details.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={goPrev}
+              className="rounded border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-brand-ink hover:bg-slate-50"
+              aria-label="Previous month"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              onClick={goToday}
+              className="rounded border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-brand-ink hover:bg-slate-50"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={goNext}
+              className="rounded border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-brand-ink hover:bg-slate-50"
+              aria-label="Next month"
+            >
+              →
+            </button>
+          </div>
+          <p className="text-xs text-slate-500">
+            <span className="mr-2 inline-flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-amber-400" /> Pending
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> Confirmed
+            </span>
+          </p>
+        </div>
+      </div>
+      <p className="mt-2 text-sm font-medium text-brand-ink/85">{monthLabel}</p>
+      <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-medium uppercase text-slate-500">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="py-1">
+            {d}
+          </div>
+        ))}
+        {dayCells.map((cell, idx) =>
+          cell.day == null ? (
+            <div key={`e-${idx}`} className="min-h-[80px] rounded border border-transparent bg-slate-50/30" />
+          ) : (
+            <div
+              key={cell.day}
+              className={`min-h-[80px] rounded border p-1 text-left text-xs ${cell.items.length ? "border-brand/35 bg-brand/5" : "border-stone-100 bg-white"}`}
+            >
+              <span className="font-semibold text-brand-ink/90">{cell.day}</span>
+              <div className="mt-1 space-y-0.5">
+                {cell.items.slice(0, 4).map((e) => (
+                  <button
+                    key={e.key}
+                    type="button"
+                    onClick={() => onSelect(e)}
+                    className={`flex w-full flex-col rounded border border-transparent px-1 py-0.5 text-left text-[10px] leading-tight transition hover:opacity-90 ${chipClass(e.bucket)}`}
+                  >
+                    <span className="font-medium">{chipTimeLabel(e)}</span>
+                    <span className="truncate">{e.lead.fullName.split(" ")[0]}</span>
+                    <span className="text-[9px] opacity-90">{e.bucket === "waiting" ? "Pending" : e.bucket === "accepted" ? "Confirmed" : "Closed"}</span>
+                  </button>
+                ))}
+                {cell.items.length > 4 ? (
+                  <p className="text-[10px] text-slate-500">+{cell.items.length - 4} more</p>
+                ) : null}
+              </div>
+            </div>
+          )
+        )}
+      </div>
+      {!events.length ? (
+        <p className="mt-3 text-sm text-slate-500">No booking activity with a date in {monthLabel}.</p>
+      ) : null}
+    </section>
+  );
 }
 
 function InboxChatColumn({
@@ -410,6 +696,7 @@ export function DashboardApp({
   const [activeView, setActiveView] = useState<(typeof SIDEBAR_VIEWS)[number]>("dashboard");
   const [liteMode, setLiteMode] = useState(false);
   const [dashboardTab, setDashboardTab] = useState<"active" | "lost">("active");
+  const [bookingDetailPick, setBookingDetailPick] = useState<BookingInviteRow | null>(null);
   const [inboxLeadId, setInboxLeadId] = useState<string | null>(null);
   const [inboxTab, setInboxTab] = useState<(typeof INBOX_TABS)[number]>("Needs Review");
   const [reviewEdit, setReviewEdit] = useState("");
@@ -609,6 +896,7 @@ export function DashboardApp({
     [vm.leads]
   );
   const dashboardRows = dashboardTab === "active" ? dashboardActiveLeads : dashboardLostLeads;
+
   const sortedDashboardRows = useMemo(() => {
     const rows = [...dashboardRows];
     const byLastReplyDesc = (a: Lead, b: Lead) => {
@@ -643,16 +931,21 @@ export function DashboardApp({
     return rows;
   }, [vm.leads]);
 
+  const simulationSuggestedLeads = useMemo(
+    () =>
+      [...vm.leads]
+        .filter((l) => !l.doNotContact)
+        .sort((a, b) => b.score - a.score || (a.fullName || "").localeCompare(b.fullName || ""))
+        .slice(0, 8),
+    [vm.leads]
+  );
+
   return (
     <div className="min-h-screen">
       <div className="grid min-h-screen grid-cols-[250px_1fr]">
         <aside className="border-r border-white/10 bg-brand-ink p-4 text-stone-100">
-          <div className="mb-6 flex items-center gap-3">
-            <img src="/gloria-logo.svg" alt="Gloria logo" className="h-10 w-10 rounded bg-white p-1" />
-            <div>
-              <p className="font-semibold">{appConfig.companyName}</p>
-              <p className="text-xs text-slate-400">1300 Schwab Rd, Hatfield, PA</p>
-            </div>
+          <div className="mb-6 flex items-center justify-center px-1">
+            <img src="/gloria-logo.svg" alt="Gloria" className="h-11 w-auto max-w-[200px] opacity-95" />
           </div>
           <nav className="space-y-2 text-sm">
             {visibleViews.map((v) => (
@@ -769,54 +1062,6 @@ export function DashboardApp({
                 {vm.addressMetrics.byClass.cabinet_shop_partner} · homeowner {vm.addressMetrics.byClass.homeowner}
               </p>
             </section>
-          )}
-          {activeView === "leads" && (
-          <section className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
-            <p className="mb-2 text-sm font-semibold text-brand-ink/90">
-              Phase 3 · Reply &amp; booking intelligence
-            </p>
-            <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
-              {[
-                ["Inbound replies", vm.phase3Metrics.repliesReceived],
-                ["Positive / link asks", vm.phase3Metrics.positiveReplies],
-                ["Booking invites sent", vm.phase3Metrics.bookingInvitesSent],
-                ["Booked meetings", vm.phase3Metrics.bookedMeetings],
-                ["Not interested", vm.phase3Metrics.notInterested],
-                ["Suppressed", vm.phase3Metrics.unsubscribes]
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
-                  <p className="text-[11px] text-slate-500">{label}</p>
-                  <p className="text-lg font-semibold">{value}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <div className="text-xs text-slate-600">
-                <p className="font-medium text-brand-ink/90">Reply rate by source</p>
-                {Object.entries(vm.phase3Metrics.replyRateBySource).map(([k, v]) => (
-                  <p key={k}>
-                    {k}: {v.replied}/{v.contacted} replied
-                  </p>
-                ))}
-              </div>
-              <div className="text-xs text-slate-600">
-                <p className="font-medium text-brand-ink/90">Reply rate by lead type</p>
-                {Object.entries(vm.phase3Metrics.replyRateByLeadType).map(([k, v]) => (
-                  <p key={k}>
-                    {k}: {v.replied}/{v.contacted}
-                  </p>
-                ))}
-              </div>
-              <div className="text-xs text-slate-600">
-                <p className="font-medium text-brand-ink/90">Booking rate by priority tier</p>
-                {Object.entries(vm.phase3Metrics.bookingRateByTier).map(([k, v]) => (
-                  <p key={k}>
-                    {k}: {v.booked}/{v.eligible} booked
-                  </p>
-                ))}
-              </div>
-            </div>
-          </section>
           )}
           {activeView === "leads" && (
             <section className="mb-4 grid grid-cols-4 gap-3">
@@ -1079,7 +1324,7 @@ export function DashboardApp({
                     <option value="all">All priorities</option><option>Tier A</option><option>Tier B</option><option>Tier C</option><option>Tier D</option>
                   </select>
                   <select className="rounded border p-2 text-sm" value={vm.filters.status} onChange={(e) => vm.setFilters((f) => ({ ...f, status: e.target.value as typeof f.status }))}>
-                    <option value="all">All status</option><option>New</option><option>In Campaign</option><option>Interested</option><option>Needs Review</option><option>Booking Sent</option><option>Booked</option><option>Not Interested</option><option>Not Now</option>
+                    <option value="all">All status</option><option>New</option><option>Qualified</option><option>In Campaign</option><option>Interested</option><option>Needs Review</option><option>Booking Sent</option><option>Booked</option><option>Not Interested</option><option>Not Now</option>
                   </select>
                 </div>
                 <div className="mb-3 grid grid-cols-4 gap-2">
@@ -1505,6 +1750,7 @@ export function DashboardApp({
             </section>
           )}
 
+          {activeView === "campaigns" && <Phase3IntelligenceCard metrics={vm.phase3Metrics} />}
           {activeView === "campaigns" && (
             <section className="card mb-4">
               <div className="mb-3 flex items-center justify-between">
@@ -1651,24 +1897,6 @@ export function DashboardApp({
                 />
               </div>
 
-              <section className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="mb-2 text-sm font-semibold text-brand-ink/90">Phase 3 · Reply &amp; booking intelligence</p>
-                <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
-                  {[
-                    ["Inbound replies", vm.phase3Metrics.repliesReceived],
-                    ["Positive / link asks", vm.phase3Metrics.positiveReplies],
-                    ["Booking invites sent", vm.phase3Metrics.bookingInvitesSent],
-                    ["Booked meetings", vm.phase3Metrics.bookedMeetings],
-                    ["Not interested", vm.phase3Metrics.notInterested],
-                    ["Suppressed", vm.phase3Metrics.unsubscribes]
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
-                      <p className="text-[11px] text-slate-500">{label}</p>
-                      <p className="text-sm font-semibold">{value}</p>
-                    </div>
-                  ))}
-                </div>
-              </section>
             </section>
           )}
           {activeView === "bookings" && (
@@ -1684,54 +1912,7 @@ export function DashboardApp({
                 </p>
               </div>
               <div className="space-y-4">
-                <section className="card">
-                  <h3 className="text-base font-semibold text-brand-ink">Invites · waiting for response</h3>
-                  <ul className="mt-3 divide-y divide-slate-100">
-                    {bookingInviteList
-                      .filter((r) => r.bucket === "waiting")
-                      .map(({ lead, b }, i) => (
-                        <li key={`w-${lead.id}-${i}`} className="flex flex-wrap items-start justify-between gap-2 py-3 text-sm">
-                          <div>
-                            <p className="font-medium text-brand-ink">{lead.fullName}</p>
-                            <p className="text-xs text-slate-500">{lead.email}</p>
-                            <p className="mt-1 text-[11px] text-slate-600">{new Date(b.at).toLocaleString()}</p>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900">Waiting</span>
-                            <BookingStatusBadge status={b.status} />
-                          </div>
-                        </li>
-                      ))}
-                  </ul>
-                  {!bookingInviteList.some((r) => r.bucket === "waiting") ? (
-                    <p className="mt-2 text-sm text-slate-500">No pending invites.</p>
-                  ) : null}
-                </section>
-                <section className="card">
-                  <h3 className="text-base font-semibold text-brand-ink">Accepted / confirmed</h3>
-                  <ul className="mt-3 divide-y divide-slate-100">
-                    {bookingInviteList
-                      .filter((r) => r.bucket === "accepted")
-                      .map(({ lead, b }, i) => (
-                        <li key={`a-${lead.id}-${i}`} className="flex flex-wrap items-start justify-between gap-2 py-3 text-sm">
-                          <div>
-                            <p className="font-medium text-brand-ink">{lead.fullName}</p>
-                            <p className="text-xs text-slate-500">{lead.email}</p>
-                            {b.meetingStart ? (
-                              <p className="mt-1 text-xs text-slate-700">{new Date(b.meetingStart).toLocaleString()}</p>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-900">Accepted</span>
-                            <BookingStatusBadge status={b.status} />
-                          </div>
-                        </li>
-                      ))}
-                  </ul>
-                  {!bookingInviteList.some((r) => r.bucket === "accepted") ? (
-                    <p className="mt-2 text-sm text-slate-500">No confirmed bookings yet.</p>
-                  ) : null}
-                </section>
+                <BookingsPageCalendar rows={bookingInviteList} onSelect={(row) => setBookingDetailPick(row)} />
                 <details className="card">
                   <summary className="cursor-pointer text-sm font-semibold text-brand-ink/90">Declined / cancelled ({bookingInviteList.filter((r) => r.bucket === "closed").length})</summary>
                   <ul className="mt-3 divide-y divide-slate-100">
@@ -1761,22 +1942,50 @@ export function DashboardApp({
               <div className="card">
                 <h2 className="text-lg font-semibold text-brand-ink">Simulation</h2>
                 <p className="mt-1 text-xs text-slate-600">
-                  Dev-only workflows: synthetic inbound messages, Cal booking confirmations, inbox seeding, mock classifier, and webhook checks. Use a sandbox lead when possible.
+                  Dev-only workflows: synthetic inbound messages, Cal booking confirmations, inbox seeding, and the tools below. Use a sandbox lead when possible.
                 </p>
-                <label className="mt-4 block max-w-lg">
-                  <span className="text-xs font-semibold text-slate-700">Target lead</span>
-                  <select
-                    className="mt-1 w-full rounded border border-slate-200 p-2 text-sm"
-                    value={simulationLeadId ?? ""}
-                    onChange={(e) => setSimulationLeadId(e.target.value || null)}
-                  >
-                    {[...vm.leads].sort((a, b) => b.score - a.score).map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.fullName} · score {l.score} · {l.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-stretch">
+                  <label className="block min-w-0 max-w-xl flex-1">
+                    <span className="text-xs font-semibold text-slate-700">Target lead</span>
+                    <select
+                      className="mt-1 w-full rounded border border-slate-200 p-2 text-sm"
+                      value={simulationLeadId ?? ""}
+                      onChange={(e) => setSimulationLeadId(e.target.value || null)}
+                    >
+                      {[...vm.leads].sort((a, b) => b.score - a.score).map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.fullName} · score {l.score} · {l.email}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex min-w-0 flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50/90 p-3">
+                    <p className="text-xs font-semibold text-brand-ink/90">Suggested targets</p>
+                    <p className="mt-1 text-[11px] text-slate-600">
+                      Strong scores and not suppressed — quick picks for simulations.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {simulationSuggestedLeads.length ? (
+                        simulationSuggestedLeads.map((l) => (
+                          <button
+                            key={l.id}
+                            type="button"
+                            onClick={() => setSimulationLeadId(l.id)}
+                            className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                              simulationLeadId === l.id
+                                ? "border-brand bg-brand text-brand-ink shadow-sm"
+                                : "border-slate-200 bg-white text-brand-ink/85 hover:border-brand/40"
+                            }`}
+                          >
+                            {l.fullName.split(" ")[0] ?? l.fullName} · {l.score}
+                          </button>
+                        ))
+                      ) : (
+                        <span className="text-[11px] text-slate-500">No eligible leads.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
                 {!vm.leads.length ? <p className="mt-2 text-sm text-slate-500">No leads loaded — import or seed data first.</p> : null}
               </div>
 
@@ -1845,9 +2054,16 @@ export function DashboardApp({
                   >
                     Mock enrich (selected lead)
                   </button>
+                  <p className="mt-2 max-w-2xl text-[11px] text-slate-600">
+                    Calls the same <code className="rounded bg-slate-100 px-0.5">POST /api/leads/[id]/enrich</code> path as production: OSM / geocode lookup, address
+                    confidence refresh, and full lead rescoring (no new email activity).
+                  </p>
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-semibold text-brand-ink/90">Mock reply classifier</p>
+                  <p className="mb-2 max-w-2xl text-[11px] text-slate-600">
+                    Runs the production inbound classifier on pasted text and updates the selected lead (status, booking hints, timeline) — a dev shortcut with no real email.
+                  </p>
                   <textarea
                     className="w-full max-w-2xl rounded border border-slate-200 p-2 text-sm"
                     rows={4}
@@ -1872,6 +2088,84 @@ export function DashboardApp({
               </p>
             </section>
           )}
+
+          {bookingDetailPick ? (
+            <div
+              className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-4"
+              role="presentation"
+              onClick={() => setBookingDetailPick(null)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="booking-detail-title"
+                className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <h3 id="booking-detail-title" className="text-lg font-semibold text-brand-ink">
+                    {bookingDetailPick.lead.fullName}
+                  </h3>
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+                    onClick={() => setBookingDetailPick(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-600">{bookingDetailPick.lead.email}</p>
+                <p className="mt-3 text-sm">
+                  <span className="font-medium text-brand-ink/90">Meeting summary</span>
+                </p>
+                <ul className="mt-2 space-y-2 text-sm text-slate-700">
+                  <li>
+                    <span className="text-slate-500">State: </span>
+                    {bookingDetailPick.bucket === "waiting"
+                      ? "Pending invite"
+                      : bookingDetailPick.bucket === "accepted"
+                        ? "Confirmed"
+                        : "Declined / cancelled"}
+                  </li>
+                  {bookingDetailPick.b.meetingStart ? (
+                    <li>
+                      <span className="text-slate-500">Start: </span>
+                      {new Date(bookingDetailPick.b.meetingStart).toLocaleString()}
+                    </li>
+                  ) : (
+                    <li>
+                      <span className="text-slate-500">Invite sent: </span>
+                      {new Date(bookingDetailPick.b.at).toLocaleString()}
+                    </li>
+                  )}
+                  {bookingDetailPick.b.meetingEnd ? (
+                    <li>
+                      <span className="text-slate-500">End: </span>
+                      {new Date(bookingDetailPick.b.meetingEnd).toLocaleString()}
+                    </li>
+                  ) : null}
+                  {bookingDetailPick.b.bookingLink ? (
+                    <li className="break-all text-xs">
+                      <span className="text-slate-500">Link: </span>
+                      <a className="text-brand-ink underline" href={bookingDetailPick.b.bookingLink} target="_blank" rel="noopener noreferrer">
+                        {clip(bookingDetailPick.b.bookingLink, 80)}
+                      </a>
+                    </li>
+                  ) : null}
+                  {bookingDetailPick.b.note?.trim() ? (
+                    <li>
+                      <span className="text-slate-500">Note: </span>
+                      {bookingDetailPick.b.note}
+                    </li>
+                  ) : null}
+                  <li className="text-xs text-slate-600">
+                    Record status: {bookingDetailPick.b.status}
+                    {bookingDetailPick.b.meetingStatus ? ` · ${bookingDetailPick.b.meetingStatus}` : ""}
+                  </li>
+                </ul>
+              </div>
+            </div>
+          ) : null}
         </main>
       </div>
     </div>

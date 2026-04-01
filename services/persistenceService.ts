@@ -11,8 +11,8 @@ import { aggregateDashboard, LeadWithCampaigns } from "@/services/dashboardAggre
 import { processInboundEmail } from "@/services/inboundProcessingService";
 import { sendOutreachEmail } from "@/services/outreachSendService";
 import { geocodeCityStateZip } from "@/services/nominatimGeocode";
-import { scoreLeadBase } from "@/services/scoringService";
-import type { CreateManualLeadPayload, Lead } from "@/types/lead";
+import { pipelineStatusForTier, scoreLeadBase } from "@/services/scoringService";
+import type { CreateManualLeadPayload, Lead, LeadStatus } from "@/types/lead";
 import {
   campaignSendEligibility,
   needsLowAddressConfirmInBatch,
@@ -150,7 +150,7 @@ export const createManualLead = async (
       projectFitScore: scored.projectFitScore,
       estimatedProjectTier: scored.estimatedProjectTier,
       priorityTier: scored.priorityTier,
-      status: "New",
+      status: pipelineStatusForTier(scored.priorityTier),
       doNotContact: false,
       deployVerifyVerdict: null,
       scoreBreakdownJson: JSON.stringify(scored.breakdown),
@@ -505,6 +505,10 @@ export const enrichLead = async (leadId: string) => {
     leadType: lead.leadType as Lead["leadType"]
   });
 
+  const st = lead.status as LeadStatus;
+  const nextPipeline =
+    st === "New" || st === "Qualified" ? pipelineStatusForTier(scored.priorityTier) : undefined;
+
   await db.lead.update({
     where: { id: leadId },
     data: {
@@ -520,6 +524,7 @@ export const enrichLead = async (leadId: string) => {
       priorityTier: scored.priorityTier,
       estimatedProjectTier: scored.estimatedProjectTier,
       scoreBreakdownJson: JSON.stringify(scored.breakdown),
+      ...(nextPipeline ? { status: nextPipeline } : {}),
       updatedAt: new Date()
     }
   });
@@ -534,7 +539,8 @@ export const recalculateAllLeadScores = async (): Promise<number> => {
       id: true,
       distanceMinutes: true,
       amountSpent: true,
-      leadType: true
+      leadType: true,
+      status: true
     }
   });
   const now = new Date();
@@ -544,6 +550,9 @@ export const recalculateAllLeadScores = async (): Promise<number> => {
       amountSpent: row.amountSpent,
       leadType: row.leadType as Lead["leadType"]
     });
+    const st = row.status as LeadStatus;
+    const nextPipeline =
+      st === "New" || st === "Qualified" ? pipelineStatusForTier(scored.priorityTier) : undefined;
     await db.lead.update({
       where: { id: row.id },
       data: {
@@ -553,6 +562,7 @@ export const recalculateAllLeadScores = async (): Promise<number> => {
         priorityTier: scored.priorityTier,
         estimatedProjectTier: scored.estimatedProjectTier,
         scoreBreakdownJson: JSON.stringify(scored.breakdown),
+        ...(nextPipeline ? { status: nextPipeline } : {}),
         updatedAt: now
       }
     });

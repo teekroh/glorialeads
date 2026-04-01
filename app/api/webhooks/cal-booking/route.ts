@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { detectCalBookingEventType, processCalBookingPayload } from "@/services/calBookingService";
 import { requireAdminApiKey, requireWebhookSecret } from "@/lib/apiRouteSecurity";
 
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
 function getHeader(request: Request, name: string): string | undefined {
   const v = request.headers.get(name);
   const s = v?.toString().trim();
@@ -60,13 +64,19 @@ export async function POST(request: Request) {
     getHeader(request, "webhook-signature");
 
   const secretFromPayload = extractSecretCandidate(body);
-  const secretErr = requireWebhookSecret(request, "CAL_WEBHOOK_SECRET", {
-    headerNames: ["x-cal-webhook-secret", "x-webhook-secret", "x-cal-secret", "webhook-secret", "webhook-signature"],
-    bodyValues: [secretFromPayload ?? "", secretFromHeader ?? ""]
-  });
-  if (secretErr) {
+  const calSecretConfigured = Boolean(process.env.CAL_WEBHOOK_SECRET?.trim());
+  if (calSecretConfigured) {
+    const secretErr = requireWebhookSecret(request, "CAL_WEBHOOK_SECRET", {
+      headerNames: ["x-cal-webhook-secret", "x-webhook-secret", "x-cal-secret", "webhook-secret", "webhook-signature"],
+      bodyValues: [secretFromPayload ?? "", secretFromHeader ?? ""]
+    });
+    if (secretErr) {
+      const adminErr = requireAdminApiKey(request);
+      if (adminErr) return secretErr;
+    }
+  } else if (isProduction()) {
     const adminErr = requireAdminApiKey(request);
-    if (adminErr) return secretErr;
+    if (adminErr) return adminErr;
   }
 
   // Clear logs for receipt + validation + event type.
@@ -75,7 +85,7 @@ export async function POST(request: Request) {
     receivedAt,
     eventType,
     hasBody: Boolean(body),
-    secretConfigured: Boolean(process.env.CAL_WEBHOOK_SECRET?.trim()),
+    secretConfigured: calSecretConfigured,
     secretHeaderPresent: Boolean(secretFromHeader),
     secretPayloadPresent: Boolean(secretFromPayload),
     secretValidated: true

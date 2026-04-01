@@ -1,4 +1,4 @@
-import { scoreLeadBase } from "@/services/scoringService";
+import { pipelineStatusForTier, scoreLeadBase } from "@/services/scoringService";
 import { Lead } from "@/types/lead";
 import { uid } from "@/lib/utils";
 
@@ -43,7 +43,7 @@ export const mockDiscoveredLeads = (): Lead[] => {
       projectFitScore: scored.projectFitScore,
       estimatedProjectTier: scored.estimatedProjectTier,
       priorityTier: scored.priorityTier,
-      status: "New",
+      status: pipelineStatusForTier(scored.priorityTier),
       doNotContact: false,
       createdAt: now,
       updatedAt: now,

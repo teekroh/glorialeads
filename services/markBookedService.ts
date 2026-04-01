@@ -23,6 +23,18 @@ export const markBooked = async (
       where: { leadId, status: "booked", meetingStatus: "confirmed" }
     });
     if (existing) {
+      const start = extras?.meetingStart ? new Date(extras.meetingStart) : null;
+      const end = extras?.meetingEnd ? new Date(extras.meetingEnd) : null;
+      if (start && !Number.isNaN(start.getTime()) && !existing.meetingStart) {
+        await db.booking.update({
+          where: { id: existing.id },
+          data: {
+            meetingStart: start,
+            meetingEnd: end && !Number.isNaN(end.getTime()) ? end : existing.meetingEnd,
+            externalBookingId: extras?.externalBookingId?.trim() || existing.externalBookingId
+          }
+        });
+      }
       return { ok: true, duplicate: true };
     }
   }
