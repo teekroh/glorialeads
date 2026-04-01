@@ -39,6 +39,38 @@ function resolveLeadImportCsvPath(): string {
   );
 }
 
+function tryResolveLeadImportCsvPath(): string | null {
+  try {
+    return resolveLeadImportCsvPath();
+  } catch {
+    return null;
+  }
+}
+
+const EMPTY_CSV_SUMMARY: ImportSummary = {
+  totalRows: 0,
+  validRows: 0,
+  skippedRows: 0,
+  duplicateRows: 0,
+  sourceFile: "(no CSV in deployment — leads use the database only)"
+};
+
+/** Dashboard / API: never throw when `resources/*.csv` is missing (e.g. Vercel without the file in git). */
+export function getLeadImportSummaryForDashboard(): ImportSummary {
+  if (!tryResolveLeadImportCsvPath()) {
+    return { ...EMPTY_CSV_SUMMARY };
+  }
+  return importCsvLeads().summary;
+}
+
+/** Seeding: use CSV when present; otherwise empty array (still seeds `mockDiscoveredLeads` in callers). */
+export function importCsvLeadsOrEmpty(): { leads: Lead[]; summary: ImportSummary } {
+  if (!tryResolveLeadImportCsvPath()) {
+    return { leads: [], summary: { ...EMPTY_CSV_SUMMARY } };
+  }
+  return importCsvLeads();
+}
+
 const pickLeadType = (company: string): LeadType => {
   const lc = company.toLowerCase();
   if (lc.includes("design")) return "designer";

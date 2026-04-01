@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { mapDbLeadToLead } from "@/lib/mappers";
-import { importCsvLeads } from "@/data/importLeads";
+import { importCsvLeadsOrEmpty } from "@/data/importLeads";
 import { mockDiscoveredLeads } from "@/services/externalDiscoveryService";
 import { outreachConfig } from "@/config/outreachConfig";
 import { isClaudeCopyConfigured } from "@/config/claudeConfig";
@@ -175,7 +175,7 @@ export const ensureSeeded = async () => {
   const count = await db.lead.count();
   if (count > 0) return;
   const now = new Date();
-  const { leads: csvLeads } = importCsvLeads();
+  const { leads: csvLeads } = importCsvLeadsOrEmpty();
   const discovered = mockDiscoveredLeads();
   const all = [...csvLeads, ...discovered];
 

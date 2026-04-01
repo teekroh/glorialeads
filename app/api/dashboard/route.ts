@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getDashboardData } from "@/services/persistenceService";
-import { importCsvLeads } from "@/data/importLeads";
+import { getLeadImportSummaryForDashboard } from "@/data/importLeads";
 
 export async function GET() {
   const data = await getDashboardData();
-  const importSummary = importCsvLeads().summary;
+  const importSummary = getLeadImportSummaryForDashboard();
   return NextResponse.json({ ...data, importSummary });
 }

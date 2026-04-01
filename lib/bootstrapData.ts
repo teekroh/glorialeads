@@ -1,4 +1,4 @@
-import { importCsvLeads } from "@/data/importLeads";
+import { importCsvLeadsOrEmpty } from "@/data/importLeads";
 import { mockDiscoveredLeads } from "@/services/externalDiscoveryService";
 import { ImportSummary } from "@/data/importLeads";
 import { Lead } from "@/types/lead";
@@ -9,7 +9,7 @@ export interface BootstrapData {
 }
 
 export const getBootstrapData = (): BootstrapData => {
-  const { leads: csvLeads, summary } = importCsvLeads();
+  const { leads: csvLeads, summary } = importCsvLeadsOrEmpty();
   const external = mockDiscoveredLeads();
   return {
     leads: [...csvLeads, ...external],

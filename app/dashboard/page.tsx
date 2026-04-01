@@ -1,5 +1,5 @@
 import { DashboardApp } from "@/components/dashboard/DashboardApp";
-import { importCsvLeads } from "@/data/importLeads";
+import { getLeadImportSummaryForDashboard } from "@/data/importLeads";
 import { getDashboardData } from "@/services/persistenceService";
 
 // Vercel build was failing during "Collecting page data" because this page is runtime-data dependent.
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const data = await getDashboardData();
-  const importSummary = importCsvLeads().summary;
+  const importSummary = getLeadImportSummaryForDashboard();
   return (
     <DashboardApp
       initialLeads={data.leads}
