@@ -56,7 +56,8 @@ function timelineMessageLabel(m: Message): string {
     follow_up_2: "Follow-up 2",
     booking_invite: "Booking invite sent",
     system_auto: "System update",
-    manual_reply: "Manual reply sent"
+    manual_reply: "Manual reply sent",
+    claude_auto_reply: "Claude auto-reply sent"
   };
   const base = kindPretty[m.kind] ?? m.kind.replace(/_/g, " ");
   return `${base}${sched}`;

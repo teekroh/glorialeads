@@ -1,25 +1,35 @@
-import { getBookingLink } from "@/config/bookingCopy";
-import { Lead } from "@/types/lead";
+import { isClaudeCopyConfigured } from "@/config/claudeConfig";
+import { draftInboundReplyWithClaude } from "@/services/claudeCopyService";
+import { draftInfoReply, draftPricingReply, draftSuggestedTimeReply } from "@/services/replyDraftTemplates";
+import { Lead, ReplyCategory } from "@/types/lead";
 
-const PRICING_DRAFT_TEMPLATE = `Totally fair — most projects vary quite a bit depending on layout and finishes.
+export { draftSuggestedTimeReply, draftPricingReply, draftInfoReply } from "@/services/replyDraftTemplates";
 
-We can usually give a pretty accurate range after a quick 10–15 minute call.
+function templateAutomatedDraft(lead: Lead, classification: ReplyCategory, inboundText: string): string | null {
+  switch (classification) {
+    case "suggested_time":
+      return draftSuggestedTimeReply(lead, inboundText);
+    case "pricing_question":
+      return draftPricingReply();
+    case "info_request":
+      return draftInfoReply(lead);
+    default:
+      return null;
+  }
+}
 
-If you're open to it:
-{{BOOKING_LINK}}`;
-
-export const draftSuggestedTimeReply = (_lead: Lead, _inboundSnippet: string) => {
-  const link = getBookingLink() || "[configure BOOKING_LINK]";
-  const name = _lead.firstName?.trim() || "there";
-  return `Hi ${name} — thanks for proposing a time. I’ll confirm or suggest a nearby slot shortly.\n\nYou can also book a 15-minute opening here: ${link}`;
-};
-
-export const draftPricingReply = () => {
-  const link = getBookingLink() || "[configure BOOKING_LINK]";
-  return PRICING_DRAFT_TEMPLATE.replace(/\{\{BOOKING_LINK\}\}/g, link);
-};
-
-export const draftInfoReply = (lead: Lead) => {
-  const name = lead.firstName?.trim() || "there";
-  return `Hi ${name} — we design, build, and install custom kitchens and millwork from Hatfield, PA, with an emphasis on fast, reliable execution. Typical lead times depend on scope; I can share a concise timeline and relevant photos on a short call when convenient.`;
-};
+/**
+ * Automated reply draft: Claude (if configured), otherwise built-in templates.
+ */
+export async function buildAutomatedReplyDraft(
+  lead: Lead,
+  classification: ReplyCategory,
+  inboundText: string
+): Promise<string | null> {
+  const baseline = templateAutomatedDraft(lead, classification, inboundText);
+  if (isClaudeCopyConfigured()) {
+    const ai = await draftInboundReplyWithClaude(lead, classification, inboundText, baseline);
+    if (ai) return ai;
+  }
+  return baseline;
+}

@@ -37,6 +37,10 @@ export default async function DashboardPage() {
       initialBookingLinkDisplay={data.bookingLinkDisplay ?? ""}
       initialBookingReplyPreview={data.bookingReplyPreview ?? ""}
       initialOutreachDryRun={data.outreachDryRun ?? true}
+      initialOutreachDryRunEnvDefault={data.outreachDryRunEnvDefault ?? data.outreachDryRun ?? true}
+      initialOutreachDryRunOverride={data.outreachDryRunOverride ?? null}
+      initialNotifications={data.notifications ?? []}
+      initialVoiceTrainingNotes={data.voiceTrainingNotes ?? []}
       importSummary={importSummary}
     />
   );

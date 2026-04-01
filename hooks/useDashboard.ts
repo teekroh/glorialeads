@@ -15,6 +15,9 @@ import {
 } from "@/services/addressConfidencePolicy";
 import type { CreateManualLeadPayload } from "@/types/lead";
 import { Lead, LeadSource, LeadStatus, LeadType, PriorityTier } from "@/types/lead";
+import type { DashboardNotificationDTO } from "@/services/dashboardNotificationService";
+import type { VoiceTrainScenarioKind } from "@/config/voiceTrainScenarios";
+import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
 
 export type AddressQuickFilter = "all" | "verified_86" | "reachable_71" | "needs_review_under_71";
 
@@ -62,7 +65,11 @@ export const useDashboard = (
   initialBookingLinkConfigured = true,
   initialBookingLinkDisplay = "",
   initialBookingReplyPreview = "",
-  initialOutreachDryRun = true
+  initialOutreachDryRun = true,
+  initialOutreachDryRunEnvDefault = initialOutreachDryRun,
+  initialOutreachDryRunOverride: boolean | null = null,
+  initialNotifications: DashboardNotificationDTO[] = [],
+  initialVoiceTrainingNotes: VoiceTrainingNoteDTO[] = []
 ) => {
   const adminApiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? "";
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
@@ -72,9 +79,14 @@ export const useDashboard = (
   const [bookingLinkDisplay, setBookingLinkDisplay] = useState(initialBookingLinkDisplay);
   const [bookingReplyPreview, setBookingReplyPreview] = useState(initialBookingReplyPreview);
   const [outreachDryRun, setOutreachDryRun] = useState(initialOutreachDryRun);
+  const [outreachDryRunEnvDefault, setOutreachDryRunEnvDefault] = useState(initialOutreachDryRunEnvDefault);
+  const [outreachDryRunOverride, setOutreachDryRunOverrideState] = useState<boolean | null>(initialOutreachDryRunOverride);
+  const [dryRunToggleBusy, setDryRunToggleBusy] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultLeadFilters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
+  const [notifications, setNotifications] = useState<DashboardNotificationDTO[]>(initialNotifications);
+  const [voiceTrainingNotes, setVoiceTrainingNotes] = useState<VoiceTrainingNoteDTO[]>(initialVoiceTrainingNotes);
 
   const refresh = async () => {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
@@ -109,6 +121,28 @@ export const useDashboard = (
     if (typeof data.bookingLinkDisplay === "string") setBookingLinkDisplay(data.bookingLinkDisplay);
     if (typeof data.bookingReplyPreview === "string") setBookingReplyPreview(data.bookingReplyPreview);
     if (typeof data.outreachDryRun === "boolean") setOutreachDryRun(data.outreachDryRun);
+    if (typeof data.outreachDryRunEnvDefault === "boolean") setOutreachDryRunEnvDefault(data.outreachDryRunEnvDefault);
+    if (
+      "outreachDryRunOverride" in data &&
+      (data.outreachDryRunOverride === null || typeof data.outreachDryRunOverride === "boolean")
+    ) {
+      setOutreachDryRunOverrideState(data.outreachDryRunOverride);
+    }
+    if (Array.isArray(data.notifications)) {
+      setNotifications(data.notifications as DashboardNotificationDTO[]);
+    }
+    if (Array.isArray(data.voiceTrainingNotes)) {
+      setVoiceTrainingNotes(data.voiceTrainingNotes as VoiceTrainingNoteDTO[]);
+    }
+  };
+
+  const markNotificationsRead = async (ids: string[]) => {
+    await fetch("/api/notifications/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids })
+    });
+    setNotifications((prev) => prev.map((n) => (ids.includes(n.id) ? { ...n, readAt: new Date().toISOString() } : n)));
   };
 
   const filtered = useMemo(
@@ -299,6 +333,41 @@ export const useDashboard = (
     await refresh();
   };
 
+  const voiceTrainingAuthHeaders = {
+    "Content-Type": "application/json",
+    ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
+  };
+
+  const generateVoiceTrainingMockClient = async (kind: VoiceTrainScenarioKind) => {
+    const res = await fetch("/api/voice-training/generate-mock", {
+      method: "POST",
+      headers: voiceTrainingAuthHeaders,
+      body: JSON.stringify({ kind })
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; mock?: string; error?: string };
+    if (!res.ok || !data.ok) {
+      return { ok: false as const, error: data.error ?? (res.status === 401 ? "Unauthorized (set ADMIN_API_KEY)" : "request_failed") };
+    }
+    return { ok: true as const, mock: data.mock ?? "" };
+  };
+
+  const saveVoiceTrainingNoteClient = async (input: {
+    scenarioKind: string;
+    mockClaudeReply: string;
+    userCorrection: string;
+  }) => {
+    const res = await fetch("/api/voice-training/notes", {
+      method: "POST",
+      headers: voiceTrainingAuthHeaders,
+      body: JSON.stringify(input)
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || !data.ok) {
+      return { ok: false as const, error: data.error ?? (res.status === 401 ? "Unauthorized" : "request_failed") };
+    }
+    return { ok: true as const };
+  };
+
   const snoozeLeadClient = async (leadId: string, followUpAt: string) => {
     await fetch(`/api/leads/${leadId}/snooze`, {
       method: "POST",
@@ -337,6 +406,43 @@ export const useDashboard = (
     return data as { ok?: boolean; error?: string; results?: unknown[] };
   };
 
+  const dispatchScheduledDue = async (limit = 20) => {
+    const res = await fetch("/api/dev/dispatch-scheduled", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
+      },
+      body: JSON.stringify({ limit })
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      dispatched?: number;
+      skipped?: number;
+      errors?: string[];
+    };
+    await refresh();
+    return data;
+  };
+
+  const setOutreachDryRunMode = async (mode: "dry" | "live" | "env_default") => {
+    setDryRunToggleBusy(true);
+    const body =
+      mode === "env_default" ? { clearOverride: true } : { mode };
+    const res = await fetch("/api/settings/outreach-dry-run", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
+      },
+      body: JSON.stringify(body)
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    setDryRunToggleBusy(false);
+    await refresh();
+    return { ok: res.ok && data.ok !== false, error: data.error, status: res.status };
+  };
+
   const createLead = async (payload: CreateManualLeadPayload) => {
     const res = await fetch("/api/leads", {
       method: "POST",
@@ -359,6 +465,10 @@ export const useDashboard = (
     bookingLinkDisplay,
     bookingReplyPreview,
     outreachDryRun,
+    outreachDryRunEnvDefault,
+    outreachDryRunOverride,
+    dryRunToggleBusy,
+    setOutreachDryRunMode,
     filtered,
     filters,
     setFilters,
@@ -375,10 +485,16 @@ export const useDashboard = (
     testCalWebhook,
     enrichLead,
     sendReviewReply,
+    voiceTrainingNotes,
+    generateVoiceTrainingMockClient,
+    saveVoiceTrainingNoteClient,
     snoozeLeadClient,
     markNotInterestedClient,
     simulateInbound,
     seedInboxSamples,
-    createLead
+    createLead,
+    notifications,
+    markNotificationsRead,
+    dispatchScheduledDue
   };
 };

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { appConfig } from "@/config/appConfig";
 import { ImportSummary } from "@/data/importLeads";
+import type { DashboardNotificationDTO } from "@/services/dashboardNotificationService";
 import { defaultLeadFilters, useDashboard } from "@/hooks/useDashboard";
 import {
   ADDRESS_CONFIDENCE_TOOLTIP,
@@ -23,7 +24,10 @@ import { Campaign } from "@/types/campaign";
 import type { LeadType } from "@/types/lead";
 import { Lead } from "@/types/lead";
 import { CampaignSequenceTree } from "@/components/dashboard/CampaignSequenceTree";
+import { NotificationsPanel } from "@/components/dashboard/NotificationsPanel";
 import { SimulationPanel } from "@/components/dashboard/SimulationPanel";
+import { VoiceTrainTab } from "@/components/dashboard/VoiceTrainTab";
+import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
 import { VerifyWorkbench } from "@/components/dashboard/VerifyWorkbench";
 import { AutomationAuditBadges } from "@/components/ui/HandlingBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
@@ -40,8 +44,8 @@ const MANUAL_LEAD_TYPES: LeadType[] = [
 
 const INBOX_TABS = ["Interested", "Booking Sent", "Needs Review", "Not Now", "Suppressed"] as const;
 
-/** Sidebar order: Dashboard → Inbox → Campaigns → Bookings → Leads → Verify → Simulation */
-const SIDEBAR_VIEWS = ["dashboard", "inbox", "campaigns", "bookings", "leads", "verify", "simulation"] as const;
+/** Sidebar order: Dashboard → Inbox → Train → Campaigns → Bookings → Leads → Verify → Simulation */
+const SIDEBAR_VIEWS = ["dashboard", "inbox", "train", "campaigns", "bookings", "leads", "verify", "simulation"] as const;
 const LITE_SIDEBAR_VIEWS = ["inbox", "bookings"] as const;
 
 function inboxTabMatches(thread: InboxThread, lead: Lead | undefined, tab: (typeof INBOX_TABS)[number]): boolean {
@@ -98,7 +102,13 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
 
   const events = useMemo(() => {
-    const out: { at: Date; leadName: string; status: string; hasScheduledStart: boolean }[] = [];
+    const out: {
+      at: Date;
+      leadName: string;
+      status: string;
+      b: BookingHistRow;
+      bucket: ReturnType<typeof classifyBookingInvite>;
+    }[] = [];
     for (const lead of leads) {
       for (const b of lead.bookingHistory) {
         const anchor = bookingCalendarAnchor(b);
@@ -107,7 +117,8 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
           at: anchor,
           leadName: lead.fullName,
           status: b.status || "—",
-          hasScheduledStart: bookingHasScheduledStart(b)
+          b,
+          bucket: classifyBookingInvite(lead, b)
         });
       }
     }
@@ -196,9 +207,10 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
             >
               <span className="font-semibold text-brand-ink/90">{cell.day}</span>
               {cell.items.slice(0, 2).map((e, j) => (
-                <p key={j} className="mt-1 truncate text-[10px] text-slate-700" title={`${e.leadName} · ${e.status}`}>
-                  {e.hasScheduledStart ? e.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Invite"}{" "}
-                  {e.leadName.split(" ")[0]}
+                <p key={j} className="mt-1 text-[10px] text-slate-700 leading-tight" title={`${e.leadName} · ${e.status}`}>
+                  <span className="font-semibold tabular-nums">{bookingChipSlotDisplay(e.b, e.at)}</span>
+                  <span className="block truncate font-medium text-brand-ink/90">{e.leadName}</span>
+                  <span className="block text-[9px] text-slate-600">{bookingChipStatusLabel(e.bucket)}</span>
                 </p>
               ))}
               {cell.items.length > 2 ? <p className="text-[10px] text-slate-500">+{cell.items.length - 2} more</p> : null}
@@ -214,7 +226,8 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
 function Phase3IntelligenceCard({ metrics }: { metrics: Phase3Metrics }) {
   return (
     <section className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
-      <p className="mb-2 text-sm font-semibold text-brand-ink/90">Phase 3 · Reply &amp; booking intelligence</p>
+      <p className="mb-2 text-sm font-semibold text-brand-ink/90">Reply &amp; booking intelligence</p>
+      <p className="mb-3 text-[11px] text-slate-600">Post–outreach funnel metrics (replies, invites, bookings). Not a campaign send step.</p>
       <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
         {[
           ["Inbound replies", metrics.repliesReceived],
@@ -299,6 +312,19 @@ function bookingHasScheduledStart(b: BookingHistRow): boolean {
   return !Number.isNaN(d.getTime());
 }
 
+function bookingChipSlotDisplay(b: BookingHistRow, anchor: Date): string {
+  if (bookingHasScheduledStart(b)) {
+    return new Date(b.meetingStart!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  return anchor.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function bookingChipStatusLabel(bucket: ReturnType<typeof classifyBookingInvite>): string {
+  if (bucket === "waiting") return "Meeting pending";
+  if (bucket === "accepted") return "Confirmed";
+  return "Cancelled";
+}
+
 type BookingInviteRow = {
   lead: Lead;
   b: NonNullable<Lead["bookingHistory"]>[number];
@@ -356,14 +382,6 @@ function BookingsPageCalendar({
     const d = new Date();
     setViewYear(d.getFullYear());
     setViewMonth(d.getMonth());
-  };
-
-  const chipTimeLabel = (e: Ev) => {
-    if (bookingHasScheduledStart(e.b)) {
-      return new Date(e.b.meetingStart!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    }
-    if (e.bucket === "waiting") return "Invite out";
-    return e.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   };
 
   const chipClass = (bucket: BookingInviteRow["bucket"]) =>
@@ -442,9 +460,9 @@ function BookingsPageCalendar({
                     onClick={() => onSelect(e)}
                     className={`flex w-full flex-col rounded border border-transparent px-1 py-0.5 text-left text-[10px] leading-tight transition hover:opacity-90 ${chipClass(e.bucket)}`}
                   >
-                    <span className="font-medium">{chipTimeLabel(e)}</span>
-                    <span className="truncate">{e.lead.fullName.split(" ")[0]}</span>
-                    <span className="text-[9px] opacity-90">{e.bucket === "waiting" ? "Pending" : e.bucket === "accepted" ? "Confirmed" : "Closed"}</span>
+                    <span className="font-semibold tabular-nums">{bookingChipSlotDisplay(e.b, e.at)}</span>
+                    <span className="truncate font-medium leading-tight">{e.lead.fullName}</span>
+                    <span className="text-[9px] font-medium opacity-95">{bookingChipStatusLabel(e.bucket)}</span>
                   </button>
                 ))}
                 {cell.items.length > 4 ? (
@@ -466,6 +484,7 @@ function InboxChatColumn({
   vm,
   inboxLead,
   inboxLeadId,
+  selectedInboundReplyId,
   latestBookingRecordFn,
   clip,
   reviewEdit,
@@ -475,18 +494,41 @@ function InboxChatColumn({
   vm: ReturnType<typeof useDashboard>;
   inboxLead: Lead | null;
   inboxLeadId: string | null;
+  selectedInboundReplyId: string | null;
   latestBookingRecordFn: typeof latestBookingRecord;
   clip: (s: string, n: number) => string;
   reviewEdit: string;
   setReviewEdit: Dispatch<SetStateAction<string>>;
   className?: string;
 }) {
-  const selectedThread = vm.inboxThreads.find((t) => t.leadId === inboxLeadId) ?? null;
+  const selectedThread = useMemo(() => {
+    if (!inboxLeadId) return null;
+    const forLead = vm.inboxThreads.filter((t) => t.leadId === inboxLeadId);
+    if (!forLead.length) return null;
+    if (selectedInboundReplyId) {
+      return forLead.find((t) => t.inboundReplyId === selectedInboundReplyId) ?? forLead[0] ?? null;
+    }
+    return forLead[0] ?? null;
+  }, [inboxLeadId, selectedInboundReplyId, vm.inboxThreads]);
+
+  const multiThreadCount = useMemo(() => {
+    if (!inboxLeadId) return 0;
+    return vm.inboxThreads.filter((t) => t.leadId === inboxLeadId).length;
+  }, [inboxLeadId, vm.inboxThreads]);
+
+  const showReplyEditor =
+    Boolean(selectedThread?.needsReview) || Boolean((selectedThread?.suggestedReplyDraft ?? "").trim());
 
   return (
     <div className={className ?? "flex min-h-0 flex-1 flex-col gap-3 space-y-0"}>
       <div className="card flex min-h-0 flex-1 flex-col overflow-hidden">
         <h3 className="mb-1 shrink-0 font-semibold text-brand-ink">Chat history</h3>
+        {multiThreadCount > 1 ? (
+          <p className="mb-2 rounded border border-amber-200/80 bg-amber-50/90 px-2 py-1.5 text-[10px] text-amber-950">
+            This lead has <strong>{multiThreadCount}</strong> inbox threads. The highlighted card above is the inbound message you are replying to; buttons use{" "}
+            <strong>that</strong> thread only.
+          </p>
+        ) : null}
         {!inboxLead || !selectedThread ? (
           <p className="text-sm text-slate-500">Select a thread above to review, approve, and send.</p>
         ) : (
@@ -526,67 +568,78 @@ function InboxChatColumn({
                   <span className="text-[11px] text-slate-600">{(selectedThread.confidence * 100).toFixed(0)}% model confidence</span>
                 </div>
                 <p className="text-[11px] text-slate-600">Next step: {selectedThread.recommendedNext}</p>
+
+                {showReplyEditor ? (
+                  <div className="mt-2 border-t border-slate-200/80 pt-2">
+                    <p className="text-[11px] font-semibold text-slate-700">Automated reply</p>
+                    <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+                      Draft for <span className="font-medium capitalize">{selectedThread.classification.replace(/_/g, " ")}</span>. Generated with Claude using your voice
+                      guidelines and corrections from the <strong className="font-medium">Train</strong> tab. Edit before sending — this panel does not save training notes.
+                    </p>
+                    <textarea
+                      className="mt-1.5 min-h-[100px] w-full rounded border border-slate-300 bg-white p-2 text-xs text-brand-ink"
+                      rows={5}
+                      value={reviewEdit || selectedThread.suggestedReplyDraft || ""}
+                      onChange={(e) => setReviewEdit(e.target.value)}
+                    />
+                  </div>
+                ) : null}
               </div>
 
-              {inboxLead.latestInbound?.needsReview ? (
+              {showReplyEditor ? (
                 <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col space-y-2 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm md:max-w-[min(100%,480px)] md:shrink-0">
-                  <p className="font-medium text-orange-900">Review queue</p>
-                  <AutomationAuditBadges
-                    needsReview={inboxLead.latestInbound.needsReview}
-                    automationAllowed={inboxLead.latestInbound.automationAllowed ?? false}
-                    automationBlockedReason={inboxLead.latestInbound.automationBlockedReason}
-                    mixedIntent={inboxLead.latestInbound.mixedIntent}
-                  />
-                  <p className="text-[11px] text-slate-700">{inboxLead.latestInbound.classificationReason}</p>
-                  {inboxLead.latestInbound.suggestedReplyDraft && (
-                    <div className="max-h-28 overflow-y-auto rounded border border-orange-100 bg-white p-2 text-xs whitespace-pre-wrap text-brand-ink/90">
-                      {inboxLead.latestInbound.suggestedReplyDraft}
-                    </div>
+                  {selectedThread.needsReview ? (
+                    <>
+                      <p className="font-medium text-orange-900">Review queue</p>
+                      <AutomationAuditBadges
+                        needsReview={selectedThread.needsReview}
+                        automationAllowed={selectedThread.automationAllowed ?? false}
+                        automationBlockedReason={selectedThread.automationBlockedReason}
+                        mixedIntent={selectedThread.mixedIntent}
+                      />
+                      <p className="text-[11px] text-slate-700">{selectedThread.classificationReason}</p>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-slate-700">
+                      This thread has a suggested draft. Edit on the left, then send or snooze here if needed.
+                    </p>
                   )}
-                  <textarea
-                    className="min-h-[88px] w-full shrink-0 rounded border border-orange-200 bg-white p-2 text-xs"
-                    rows={4}
-                    value={reviewEdit || inboxLead.latestInbound?.suggestedReplyDraft || ""}
-                    onChange={(e) => setReviewEdit(e.target.value)}
-                  />
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-brand-ink hover:bg-brand-dark"
+                      title="Sends the automated reply you edited on the left"
                       onClick={() => {
-                        const d = inboxLead.latestInbound?.suggestedReplyDraft || "";
-                        void vm.sendReviewReply(inboxLead.id, d, inboxLead.latestInbound?.id);
+                        const text = (reviewEdit || selectedThread.suggestedReplyDraft || "").trim();
+                        if (!text) return;
+                        void vm.sendReviewReply(inboxLead.id, text, selectedThread.inboundReplyId);
                       }}
                     >
-                      Approve &amp; send
+                      Send reply
                     </button>
+                    <div className="flex flex-wrap items-center gap-1 border-l border-orange-200/80 pl-2">
+                      <input
+                        type="date"
+                        className="rounded border px-2 py-1 text-xs"
+                        title="Set follow-up date (moves lead to Not Now)"
+                        onChange={(e) => e.target.value && void vm.snoozeLeadClient(inboxLead.id, new Date(e.target.value).toISOString())}
+                      />
+                      <span className="text-[10px] text-slate-600">Snooze follow-up</span>
+                    </div>
                     <button
                       type="button"
-                      className="rounded-md border border-orange-400 bg-white px-3 py-1.5 text-xs font-semibold text-orange-900"
-                      onClick={() =>
-                        void vm.sendReviewReply(
-                          inboxLead.id,
-                          reviewEdit || inboxLead.latestInbound?.suggestedReplyDraft || "",
-                          inboxLead.latestInbound?.id
-                        )
-                      }
-                    >
-                      Edit &amp; send
-                    </button>
-                    <input
-                      type="date"
-                      className="rounded border px-2 py-1 text-xs"
-                      onChange={(e) => e.target.value && void vm.snoozeLeadClient(inboxLead.id, new Date(e.target.value).toISOString())}
-                    />
-                    <span className="self-center text-[10px] text-slate-600">Snooze</span>
-                    <button
-                      type="button"
+                      title="Mark lead not interested and retire from active pipeline"
                       className="rounded-md border border-rose-200 px-3 py-1.5 text-xs text-rose-800"
                       onClick={() => void vm.markNotInterestedClient(inboxLead.id)}
                     >
                       Not interested
                     </button>
                   </div>
+                  <p className="text-[10px] text-slate-600">
+                    Edit the message in the <strong>Automated reply</strong> panel on the left, then <strong>Send reply</strong> here.{" "}
+                    <strong>Snooze</strong> only sets a follow-up reminder (lead moves toward &quot;Not Now&quot;); it does <strong>not</strong> schedule the email.{" "}
+                    <strong>Not interested</strong> marks the lead as not interested and removes them from the active reply pipeline.
+                  </p>
                 </div>
               ) : null}
             </div>
@@ -606,6 +659,10 @@ export function DashboardApp({
   initialBookingLinkDisplay = "",
   initialBookingReplyPreview = "",
   initialOutreachDryRun = true,
+  initialOutreachDryRunEnvDefault,
+  initialOutreachDryRunOverride = null,
+  initialNotifications = [],
+  initialVoiceTrainingNotes = [],
   importSummary
 }: {
   initialLeads: Lead[];
@@ -616,6 +673,10 @@ export function DashboardApp({
   initialBookingLinkDisplay?: string;
   initialBookingReplyPreview?: string;
   initialOutreachDryRun?: boolean;
+  initialOutreachDryRunEnvDefault?: boolean;
+  initialOutreachDryRunOverride?: boolean | null;
+  initialNotifications?: DashboardNotificationDTO[];
+  initialVoiceTrainingNotes?: VoiceTrainingNoteDTO[];
   importSummary: ImportSummary;
 }) {
   const vm = useDashboard(
@@ -626,7 +687,11 @@ export function DashboardApp({
     initialBookingLinkConfigured,
     initialBookingLinkDisplay,
     initialBookingReplyPreview,
-    initialOutreachDryRun
+    initialOutreachDryRun,
+    initialOutreachDryRunEnvDefault ?? initialOutreachDryRun,
+    initialOutreachDryRunOverride ?? null,
+    initialNotifications,
+    initialVoiceTrainingNotes
   );
 
   type LeadStatFilterAction =
@@ -698,6 +763,8 @@ export function DashboardApp({
   const [dashboardTab, setDashboardTab] = useState<"active" | "lost">("active");
   const [bookingDetailPick, setBookingDetailPick] = useState<BookingInviteRow | null>(null);
   const [inboxLeadId, setInboxLeadId] = useState<string | null>(null);
+  /** Which inbound message thread is active when one lead has multiple inbox rows. */
+  const [inboxInboundReplyId, setInboxInboundReplyId] = useState<string | null>(null);
   const [inboxTab, setInboxTab] = useState<(typeof INBOX_TABS)[number]>("Needs Review");
   const [reviewEdit, setReviewEdit] = useState("");
   const [calWebhookTest, setCalWebhookTest] = useState<string | null>(null);
@@ -757,6 +824,25 @@ export function DashboardApp({
     }
     return map;
   }, [vm.inboxThreads, vm.leads]);
+
+  useEffect(() => {
+    if (!inboxLeadId) {
+      setInboxInboundReplyId(null);
+      return;
+    }
+    const inTab = inboxByTab[inboxTab].filter((t) => t.leadId === inboxLeadId);
+    if (!inTab.length) {
+      setInboxInboundReplyId(null);
+      return;
+    }
+    setInboxInboundReplyId((prev) => {
+      if (prev && inTab.some((t) => t.inboundReplyId === prev)) return prev;
+      const lead = vm.leads.find((l) => l.id === inboxLeadId);
+      const prefer = lead?.latestInbound?.id;
+      const pick = prefer ? inTab.find((t) => t.inboundReplyId === prefer) : undefined;
+      return (pick ?? inTab[0])!.inboundReplyId;
+    });
+  }, [inboxLeadId, inboxTab, inboxByTab, vm.leads]);
 
   const exportData = () => {
     const blob = new Blob([JSON.stringify(vm.filtered, null, 2)], { type: "application/json" });
@@ -913,6 +999,9 @@ export function DashboardApp({
       rows.sort(byLastReplyDesc);
     } else {
       rows.sort((a, b) => {
+        const ra = leadNeedsInboxReview(a) ? 0 : 1;
+        const rb = leadNeedsInboxReview(b) ? 0 : 1;
+        if (ra !== rb) return ra - rb;
         const ni = notInterestedLast(a, b);
         if (ni !== 0) return ni;
         return byLastReplyDesc(a, b);
@@ -944,8 +1033,9 @@ export function DashboardApp({
     <div className="min-h-screen">
       <div className="grid min-h-screen grid-cols-[250px_1fr]">
         <aside className="border-r border-white/10 bg-brand-ink p-4 text-stone-100">
-          <div className="mb-6 flex items-center justify-center px-1">
-            <img src="/gloria-logo.svg" alt="Gloria" className="h-11 w-auto max-w-[200px] opacity-95" />
+          <div className="mb-6 flex items-center justify-center gap-3 px-1">
+            <img src="/gloria-logo.svg" alt="" className="h-11 w-auto shrink-0 max-w-[120px] opacity-95" aria-hidden />
+            <span className="font-semibold tracking-tight text-xl text-stone-100">Gloria</span>
           </div>
           <nav className="space-y-2 text-sm">
             {visibleViews.map((v) => (
@@ -980,6 +1070,71 @@ export function DashboardApp({
         </aside>
 
         <main className="p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div
+              className={`flex max-w-xl flex-1 flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
+                vm.outreachDryRun
+                  ? "border-amber-200 bg-amber-50/90 text-amber-950"
+                  : "border-rose-300 bg-rose-50/95 text-rose-950"
+              }`}
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="font-semibold">{vm.outreachDryRun ? "Dry run — emails are not delivered" : "Live sends — Resend delivers real mail"}</span>
+                <span className="text-[11px] opacity-90">
+                  .env DRY_RUN default: {vm.outreachDryRunEnvDefault ? "on" : "off"}
+                  {vm.outreachDryRunOverride === null
+                    ? " · Dashboard override: none"
+                    : vm.outreachDryRunOverride
+                      ? " · Dashboard override: force dry"
+                      : " · Dashboard override: force live"}
+                </span>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 shrink-0">
+                <span className="text-xs font-medium">Dry run</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-checked={vm.outreachDryRun}
+                  className="h-5 w-5 cursor-pointer accent-amber-800"
+                  checked={vm.outreachDryRun}
+                  disabled={vm.dryRunToggleBusy}
+                  onChange={async (e) => {
+                    const wantDry = e.target.checked;
+                    if (!wantDry) {
+                      const ok = window.confirm(
+                        "Turn OFF dry run and send real email via Resend? Leads will receive actual messages. Continue?"
+                      );
+                      if (!ok) return;
+                    }
+                    const r = await vm.setOutreachDryRunMode(wantDry ? "dry" : "live");
+                    if (!r.ok && r.error) {
+                      window.alert(r.error);
+                    }
+                  }}
+                />
+              </label>
+              {vm.outreachDryRunOverride !== null ? (
+                <button
+                  type="button"
+                  disabled={vm.dryRunToggleBusy}
+                  className="shrink-0 rounded border border-slate-400/60 bg-white/80 px-2 py-1 text-[11px] font-medium hover:bg-white"
+                  onClick={() => void vm.setOutreachDryRunMode("env_default")}
+                >
+                  Use .env only
+                </button>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <NotificationsPanel items={vm.notifications} onMarkRead={(ids) => vm.markNotificationsRead(ids)} />
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => void vm.refresh()}
+              >
+                Refresh data
+              </button>
+            </div>
+          </div>
           {!vm.bookingLinkConfigured && (
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
               <p className="font-semibold">BOOKING_LINK not configured</p>
@@ -1527,6 +1682,10 @@ export function DashboardApp({
                   ) : null}
                   <button
                     onClick={async () => {
+                      if (vm.selectedIds.length === 0) {
+                        window.alert("Select one or more leads in the table (checkboxes) before launching.");
+                        return;
+                      }
                       const data = await vm.launchCampaign(campaignName, launchAddressOpts);
                       if (data && "ok" in data && data.ok && data.result) {
                         const r = data.result;
@@ -1682,7 +1841,9 @@ export function DashboardApp({
                       return (
                         <tr
                           key={lead.id}
-                          className="cursor-pointer border-t hover:bg-slate-50"
+                          className={`cursor-pointer border-t hover:bg-slate-50 ${
+                            leadNeedsInboxReview(lead) ? "bg-amber-50/90 ring-1 ring-inset ring-amber-200/70" : ""
+                          }`}
                           onClick={() => {
                             if (leadNeedsInboxReview(lead)) {
                               setInboxLeadId(lead.id);
@@ -1850,13 +2011,14 @@ export function DashboardApp({
                 </div>
                 <div className="flex gap-2 overflow-x-auto px-3 py-2">
                   {inboxByTab[inboxTab].map((t) => {
-                    const active = inboxLeadId === t.leadId;
+                    const active = inboxLeadId === t.leadId && inboxInboundReplyId === t.inboundReplyId;
                     return (
                       <button
                         key={`${t.leadId}-${t.inboundReplyId}`}
                         type="button"
                         onClick={() => {
                           setInboxLeadId(t.leadId);
+                          setInboxInboundReplyId(t.inboundReplyId);
                           setReviewEdit("");
                         }}
                         className={`min-w-[200px] max-w-[260px] shrink-0 rounded-lg border p-2.5 text-left transition ${
@@ -1889,6 +2051,7 @@ export function DashboardApp({
                   vm={vm}
                   inboxLead={inboxLead}
                   inboxLeadId={inboxLeadId}
+                  selectedInboundReplyId={inboxInboundReplyId}
                   latestBookingRecordFn={latestBookingRecord}
                   clip={clip}
                   reviewEdit={reviewEdit}
@@ -1898,6 +2061,14 @@ export function DashboardApp({
               </div>
 
             </section>
+          )}
+          {activeView === "train" && (
+            <VoiceTrainTab
+              notes={vm.voiceTrainingNotes}
+              onRefresh={vm.refresh}
+              generateMock={vm.generateVoiceTrainingMockClient}
+              saveNote={vm.saveVoiceTrainingNoteClient}
+            />
           )}
           {activeView === "bookings" && (
             <section className="space-y-4">
@@ -1993,6 +2164,14 @@ export function DashboardApp({
                 leadId={simulationLeadId}
                 onSimulateInbound={(sc) => simulationLeadId && void vm.simulateInbound(simulationLeadId, sc)}
                 onSimulateBooking={() => simulationLeadId && void vm.simulateCalBookingConfirmation(simulationLeadId)}
+                onDispatchScheduledDue={() =>
+                  void vm.dispatchScheduledDue(25).then((r) => {
+                    window.alert(
+                      `Dispatched: ${r.dispatched ?? 0} · skipped: ${r.skipped ?? 0}` +
+                        ((r.errors?.length ? "\nErrors:\n" + r.errors.slice(0, 5).join("\n") : "") || "")
+                    );
+                  })
+                }
               />
 
               <div className="card space-y-3">

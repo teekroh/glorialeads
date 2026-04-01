@@ -23,6 +23,16 @@ function extractBearerToken(request: Request): string | null {
   return auth.slice(7).trim() || null;
 }
 
+/** Vercel Cron / external scheduler: Authorization: Bearer CRON_SECRET or x-cron-secret header. */
+export function verifyCronSecret(request: Request): boolean {
+  const secret = process.env.CRON_SECRET?.trim() ?? "";
+  if (!secret) return false;
+  const auth = request.headers.get("authorization")?.trim() ?? "";
+  const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  const header = request.headers.get("x-cron-secret")?.trim() ?? "";
+  return bearer === secret || header === secret;
+}
+
 export function requireAdminApiKey(request: Request): NextResponse | null {
   if (!isProduction()) return null;
   const expected = process.env.ADMIN_API_KEY?.trim() ?? "";

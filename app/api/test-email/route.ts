@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { withOutreachSignature } from "@/services/outreachSendService";
 import { blockInProductionUnlessEnabled, requireAdminApiKey } from "@/lib/apiRouteSecurity";
+import { getEffectiveOutreachDryRun } from "@/services/outreachDryRunService";
 
 const TEST_TO = "timothyjkroh@gmail.com";
 const SUBJECT = "Gloria test email";
@@ -15,18 +16,18 @@ export async function GET(request: Request) {
   const resendApiKey = process.env.RESEND_API_KEY ?? "";
   const fromEmail = process.env.OUTREACH_FROM_EMAIL ?? "";
   const replyToEmail = process.env.OUTREACH_REPLY_TO_EMAIL ?? "";
-  const dryRun = (process.env.DRY_RUN ?? "true").toLowerCase() === "true";
+  const dryRun = await getEffectiveOutreachDryRun();
 
   console.log("[test-email] RESEND_API_KEY present:", Boolean(resendApiKey && resendApiKey.length > 0));
   console.log("[test-email] RESEND_API_KEY prefix:", resendApiKey ? `${resendApiKey.slice(0, 4)}…` : "(empty)");
-  console.log("[test-email] DRY_RUN:", dryRun);
+  console.log("[test-email] effective dry run:", dryRun);
   console.log("[test-email] OUTREACH_FROM_EMAIL:", fromEmail || "(empty)");
   console.log("[test-email] OUTREACH_REPLY_TO_EMAIL:", replyToEmail || "(empty)");
 
   if (dryRun) {
     return NextResponse.json({
       skipped: true,
-      reason: "DRY_RUN is true — send skipped.",
+      reason: "Effective dry run is on (DRY_RUN env and/or dashboard override) — send skipped.",
       debug: {
         resendApiKeyPresent: Boolean(resendApiKey),
         dryRun,

@@ -1,15 +1,91 @@
 import { replyAutomationConfig } from "@/config/replyAutomationConfig";
+import { isClaudeCopyConfigured } from "@/config/claudeConfig";
 import { getBookingLink, humanBookingMessage, isBookingLinkConfigured, warnBookingLinkMissing } from "@/config/bookingCopy";
 import { shouldSuppressBookingInvite } from "@/services/bookingGate";
 import { db } from "@/lib/db";
 import { mapDbLeadToLead } from "@/lib/mappers";
 import { addBusinessDays, uid } from "@/lib/utils";
 import { classifyReply, ReplyClassificationResult } from "@/services/replyClassifier";
-import { draftInfoReply, draftPricingReply, draftSuggestedTimeReply } from "@/services/replyDrafts";
+import { autoReplySubjectForClassification, evaluateClaudeAutoSend } from "@/services/claudeAutoReplyService";
+import { refineReplyClassificationWithClaude, shouldRefineClassificationWithClaude } from "@/services/claudeClassifierService";
+import { createDashboardNotification } from "@/services/dashboardNotificationService";
+import {
+  draftBookingInviteWithClaude,
+  draftUnclearReplyWithClaude,
+  expandClaudeBookingPlaceholders
+} from "@/services/claudeCopyService";
+import { buildAutomatedReplyDraft, draftSuggestedTimeReply } from "@/services/replyDrafts";
 import { sendOutreachEmail } from "@/services/outreachSendService";
 import { tryAutoBookSuggestedTime } from "@/services/googleCalendarBookingService";
 import { markBooked } from "@/services/markBookedService";
 import { Lead, LeadStatus, ReplyCategory } from "@/types/lead";
+
+const CLAUDE_GATED_AUTO_CLASSIFICATIONS: ReplyCategory[] = [
+  "pricing_question",
+  "info_request",
+  "suggested_time",
+  "unclear",
+  "positive",
+  "asks_for_link"
+];
+
+async function tryClaudeGatedAutoSend(params: {
+  lead: { id: string; email: string };
+  leadDto: Lead;
+  campaignId: string | null;
+  classification: ReplyCategory;
+  raw: ReplyClassificationResult;
+  bodyText: string;
+  suggestedReplyDraft: string | null;
+}): Promise<{ ok: true; body: string; rationale: string } | { ok: false }> {
+  if (!replyAutomationConfig.claudeAutoSendEnabled || !isClaudeCopyConfigured()) return { ok: false };
+  if (params.raw.mixedIntent) return { ok: false };
+  if (!params.suggestedReplyDraft?.trim()) return { ok: false };
+  if (!CLAUDE_GATED_AUTO_CLASSIFICATIONS.includes(params.classification)) return { ok: false };
+
+  const decision = await evaluateClaudeAutoSend({
+    lead: params.leadDto,
+    classification: params.classification,
+    classifierConfidence: params.raw.confidence,
+    classifierReason: params.raw.reason,
+    mixedIntent: params.raw.mixedIntent,
+    inboundText: params.bodyText,
+    proposedDraft: params.suggestedReplyDraft
+  });
+  if (!decision || decision.confidence < replyAutomationConfig.claudeAutoSendMinConfidence) return { ok: false };
+
+  const body = expandClaudeBookingPlaceholders(decision.replyBody.trim());
+  const subject = autoReplySubjectForClassification(params.classification);
+  const send = await sendOutreachEmail({
+    to: params.lead.email,
+    subject,
+    text: body,
+    intendedTo: params.lead.email
+  });
+
+  await db.message.create({
+    data: {
+      id: uid(),
+      leadId: params.lead.id,
+      campaignId: params.campaignId,
+      direction: "outbound",
+      kind: "claude_auto_reply",
+      body: `[Claude auto ${decision.confidence.toFixed(2)}] ${send.finalText}`,
+      sentAt: new Date(),
+      status: send.status === "failed" ? "failed" : send.status === "dry_run" ? "dry_run" : "sent"
+    }
+  });
+
+  if (send.status === "failed") return { ok: false };
+
+  void createDashboardNotification({
+    kind: "claude_auto_reply",
+    title: `Auto-reply sent · ${params.leadDto.fullName}`,
+    body: `${params.classification} — ${subject}\n${body.slice(0, 360)}`
+  });
+
+  return { ok: true, body, rationale: decision.rationale };
+}
 
 export interface InboundEmailPayload {
   fromEmail: string;
@@ -41,19 +117,6 @@ export async function stopPendingForCampaign(leadId: string, campaignId: string)
     where: { leadId, campaignId, status: "scheduled" },
     data: { status: "stopped_campaign_objection" }
   });
-}
-
-function buildDraft(lead: Lead, classification: ReplyCategory, inboundText: string): string | null {
-  switch (classification) {
-    case "suggested_time":
-      return draftSuggestedTimeReply(lead, inboundText);
-    case "pricing_question":
-      return draftPricingReply();
-    case "info_request":
-      return draftInfoReply(lead);
-    default:
-      return null;
-  }
 }
 
 function resolveBookingAutomationBlockReason(
@@ -105,7 +168,11 @@ export async function processInboundEmail(
 
   await stopPendingOutreachForLead(lead.id);
 
-  const raw = classifyReply(payload.bodyText);
+  let raw = classifyReply(payload.bodyText);
+  if (shouldRefineClassificationWithClaude(raw)) {
+    const refined = await refineReplyClassificationWithClaude(payload.bodyText, raw);
+    if (refined) raw = refined;
+  }
   const classification: ReplyCategory = raw.classification;
   const bookingLinkPresent = isBookingLinkConfigured();
   const alreadyBookedPipeline = await shouldSuppressBookingInvite(lead.id);
@@ -125,17 +192,21 @@ export async function processInboundEmail(
   );
 
   const leadDto = mapDbLeadToLead(lead);
-  let suggestedReplyDraft = buildDraft(leadDto, classification, payload.bodyText);
+  let suggestedReplyDraft = await buildAutomatedReplyDraft(leadDto, classification, payload.bodyText);
 
   if (classification === "unclear") {
+    const unclearFallback = `Hi ${lead.firstName || "there"} — thanks for your note. Could you share a bit more about what you have in mind? If helpful, here’s where to book a quick intro: ${getBookingLink() || "[BOOKING_LINK]"}`;
     suggestedReplyDraft =
       suggestedReplyDraft ??
-      `Hi ${lead.firstName || "there"} — thanks for your note. Could you share a bit more about what you have in mind? If helpful, here’s where to book a quick intro: ${getBookingLink() || "[BOOKING_LINK]"}`;
+      (isClaudeCopyConfigured() ? await draftUnclearReplyWithClaude(leadDto, payload.bodyText) : null) ??
+      unclearFallback;
   }
 
   if ((classification === "positive" || classification === "asks_for_link") && !canAutoBook && !alreadyBookedPipeline) {
     warnBookingLinkMissing("review-queue booking draft");
-    suggestedReplyDraft = humanBookingMessage();
+    suggestedReplyDraft =
+      (isClaudeCopyConfigured() ? await draftBookingInviteWithClaude(leadDto, payload.bodyText) : null) ??
+      humanBookingMessage();
   }
 
   let needsReview =
@@ -210,15 +281,39 @@ export async function processInboundEmail(
   };
 
   if (classification === "unclear") {
+    let unclearNeedsReview = true;
+    let unclearAutoAllowed = false;
+    let unclearBlocked: string | null = null;
+    let unclearActions = ["stored_inbound", "classified_unclear", "routed_needs_review"];
+
+    if (!raw.mixedIntent) {
+      const gated = await tryClaudeGatedAutoSend({
+        lead,
+        leadDto,
+        campaignId,
+        classification,
+        raw,
+        bodyText: payload.bodyText,
+        suggestedReplyDraft
+      });
+      if (gated.ok) {
+        unclearNeedsReview = false;
+        unclearAutoAllowed = true;
+        unclearBlocked = `Claude auto-send (${replyAutomationConfig.claudeAutoSendMinConfidence}+): ${gated.rationale.slice(0, 240)}`;
+        suggestedReplyDraft = gated.body;
+        unclearActions = [...unclearActions, "claude_auto_reply_sent"];
+      }
+    }
+
     await persistInbound({
-      needsReview: true,
-      autoActionTaken: JSON.stringify(["stored_inbound", "classified_unclear", "routed_needs_review"]),
-      automationAllowed: false,
-      automationBlockedReason: null
+      needsReview: unclearNeedsReview,
+      autoActionTaken: JSON.stringify(unclearActions),
+      automationAllowed: unclearAutoAllowed,
+      automationBlockedReason: unclearBlocked
     });
     await db.lead.update({
       where: { id: lead.id },
-      data: { status: "Needs Review", updatedAt: new Date() }
+      data: { status: unclearNeedsReview ? "Needs Review" : "In Campaign", updatedAt: new Date() }
     });
     return { ok: true, inboundReplyId: inboundId, classification };
   }
@@ -234,7 +329,8 @@ export async function processInboundEmail(
     !raw.mixedIntent &&
     bookingLinkPresent
   ) {
-    const body = draftPricingReply();
+    const body = suggestedReplyDraft;
+    if (!body) return { ok: false, error: "No pricing reply draft" };
     const send = await sendOutreachEmail({
       to: lead.email,
       subject: "Re: Pricing — quick intro",
@@ -414,11 +510,29 @@ export async function processInboundEmail(
           }
         });
 
-        const body = humanBookingMessage();
+        let inviteBody =
+          (isClaudeCopyConfigured() ? await draftBookingInviteWithClaude(leadDto, payload.bodyText) : null) ??
+          humanBookingMessage();
+        if (replyAutomationConfig.claudeAutoSendEnabled && isClaudeCopyConfigured()) {
+          const gatedInvite = await evaluateClaudeAutoSend({
+            lead: leadDto,
+            classification,
+            classifierConfidence: raw.confidence,
+            classifierReason: raw.reason,
+            mixedIntent: raw.mixedIntent,
+            inboundText: payload.bodyText,
+            proposedDraft: inviteBody
+          });
+          if (!gatedInvite || gatedInvite.confidence < replyAutomationConfig.claudeAutoSendMinConfidence) {
+            inviteBody = humanBookingMessage();
+          } else {
+            inviteBody = expandClaudeBookingPlaceholders(gatedInvite.replyBody.trim());
+          }
+        }
         const send = await sendOutreachEmail({
           to: lead.email,
           subject: "15-minute intro — pick a time",
-          text: body,
+          text: inviteBody,
           intendedTo: lead.email
         });
 
@@ -509,6 +623,33 @@ export async function processInboundEmail(
       needsReview = true;
       automationAllowed = false;
       automationBlockedReason = null;
+  }
+
+  if (
+    needsReview &&
+    suggestedReplyDraft?.trim() &&
+    !raw.mixedIntent &&
+    replyAutomationConfig.claudeAutoSendEnabled &&
+    isClaudeCopyConfigured() &&
+    CLAUDE_GATED_AUTO_CLASSIFICATIONS.includes(classification)
+  ) {
+    const gated = await tryClaudeGatedAutoSend({
+      lead,
+      leadDto,
+      campaignId,
+      classification,
+      raw,
+      bodyText: payload.bodyText,
+      suggestedReplyDraft
+    });
+    if (gated.ok) {
+      needsReview = false;
+      automationAllowed = true;
+      automationBlockedReason = `Claude auto-send: ${gated.rationale.slice(0, 280)}`;
+      suggestedReplyDraft = gated.body;
+      nextStatus = "In Campaign";
+      actions.push("claude_auto_reply_sent");
+    }
   }
 
   await persistInbound({

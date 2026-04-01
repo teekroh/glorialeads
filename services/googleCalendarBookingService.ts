@@ -3,7 +3,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { google } from "googleapis";
 import { JWT } from "google-auth-library";
 import { googleCalendarConfig, isGoogleCalendarConfigured } from "@/config/googleCalendarConfig";
-import { outreachConfig } from "@/config/outreachConfig";
+import { getEffectiveOutreachDryRun } from "@/services/outreachDryRunService";
 import type { Lead as DbLead } from "@prisma/client";
 
 export type SuggestedTimeAutoResult =
@@ -106,7 +106,8 @@ export async function tryAutoBookSuggestedTime(params: {
   const slotMin = googleCalendarConfig.slotMinutes;
   const name = firstNameFallback || "there";
 
-  const googleReady = isGoogleCalendarConfigured() && !outreachConfig.dryRun;
+  const dryRun = await getEffectiveOutreachDryRun();
+  const googleReady = isGoogleCalendarConfigured() && !dryRun;
 
   if (!googleReady) {
     return { handled: false, reason: "google_calendar_not_configured_or_dry_run" };

@@ -3,11 +3,18 @@ import { mapDbLeadToLead } from "@/lib/mappers";
 import { importCsvLeads } from "@/data/importLeads";
 import { mockDiscoveredLeads } from "@/services/externalDiscoveryService";
 import { outreachConfig } from "@/config/outreachConfig";
-import { renderFirstTouchMessage } from "@/services/messagingService";
+import { isClaudeCopyConfigured } from "@/config/claudeConfig";
+import {
+  composeFirstTouchFromFullLeadWithClaude,
+  enhanceFollowUp1WithClaude,
+  enhanceFollowUp2WithClaude
+} from "@/services/claudeCopyService";
+import { generateFirstTouchMessage } from "@/services/firstTouchMessageGenerator";
 import { generateFollowUp1Message, generateFollowUp2Message } from "@/services/followUpMessageGenerator";
 import { addBusinessDays, uid } from "@/lib/utils";
 import { getBookingLink, getBookingLinkForDisplay, getBookingReplyTemplate, isBookingLinkConfigured } from "@/config/bookingCopy";
 import { aggregateDashboard, LeadWithCampaigns } from "@/services/dashboardAggregation";
+import { listDashboardNotifications } from "@/services/dashboardNotificationService";
 import { processInboundEmail } from "@/services/inboundProcessingService";
 import { sendOutreachEmail } from "@/services/outreachSendService";
 import { geocodeCityStateZip } from "@/services/nominatimGeocode";
@@ -19,6 +26,8 @@ import {
   type LaunchCampaignOptions
 } from "@/services/addressConfidencePolicy";
 import { deployVerifySendGate, isEligibleForCampaignSend } from "@/services/deployVerifyPolicy";
+import { listVoiceTrainingNotes } from "@/services/voiceTrainingStorage";
+import { getEffectiveOutreachDryRun, getOutreachDryRunDashboardState } from "@/services/outreachDryRunService";
 
 const OWNER_LEAD_ID = "lead-owner-tim-kroh";
 
@@ -255,9 +264,15 @@ export const getDashboardData = async () => {
   );
 
   const bookingLinkDisplay = getBookingLink() || getBookingLinkForDisplay();
+  const notifications = await listDashboardNotifications(80);
+  const voiceTrainingNotes = await listVoiceTrainingNotes(80);
+  const dryRunState = await getOutreachDryRunDashboardState();
+
   return {
     leads: leadsMapped,
     campaigns: campaignsForUi,
+    notifications,
+    voiceTrainingNotes,
     messageCount: messages.length,
     followUps,
     bookings,
@@ -267,7 +282,9 @@ export const getDashboardData = async () => {
     bookingLinkConfigured: isBookingLinkConfigured(),
     bookingLinkDisplay,
     bookingReplyPreview: getBookingReplyTemplate(),
-    outreachDryRun: outreachConfig.dryRun
+    outreachDryRun: dryRunState.effective,
+    outreachDryRunEnvDefault: dryRunState.envDefault,
+    outreachDryRunOverride: dryRunState.override
   };
 };
 
@@ -282,7 +299,7 @@ export type LaunchCampaignResult = {
   skippedByDeployVerify: number;
   dryRun: boolean;
   error?: string;
-  errorCode?: "CONFIRM_LOW_ADDRESS_REQUIRED";
+  errorCode?: "CONFIRM_LOW_ADDRESS_REQUIRED" | "NO_LEADS_SELECTED";
 };
 
 export const launchCampaign = async (
@@ -292,6 +309,7 @@ export const launchCampaign = async (
 ): Promise<LaunchCampaignResult> => {
   await ensureSeeded();
   await ensureOwnerTestLead();
+  const dryRunEffective = await getEffectiveOutreachDryRun();
 
   const opts: LaunchCampaignOptions = {
     includeBelowOutreachMin: Boolean(options.includeBelowOutreachMin),
@@ -301,8 +319,23 @@ export const launchCampaign = async (
   };
 
   const uniqueIds = [...new Set(leadIds)];
-  const leadRows =
-    uniqueIds.length > 0 ? await db.lead.findMany({ where: { id: { in: uniqueIds } } }) : [];
+  if (uniqueIds.length === 0) {
+    return {
+      ok: false,
+      error: "Select at least one lead before launching a campaign.",
+      errorCode: "NO_LEADS_SELECTED",
+      campaignId: "",
+      sentCount: 0,
+      skippedByLimit: 0,
+      skippedByAddressPolicy: 0,
+      skippedVeryPoor: 0,
+      skippedDoNotContact: 0,
+      skippedByDeployVerify: 0,
+      dryRun: dryRunEffective
+    };
+  }
+
+  const leadRows = await db.lead.findMany({ where: { id: { in: uniqueIds } } });
   const byId = new Map(leadRows.map((r) => [r.id, r]));
   const selectedDtos = uniqueIds.flatMap((id) => {
     const row = byId.get(id);
@@ -323,7 +356,7 @@ export const launchCampaign = async (
       skippedVeryPoor: 0,
       skippedDoNotContact: 0,
       skippedByDeployVerify: 0,
-      dryRun: outreachConfig.dryRun
+      dryRun: dryRunEffective
     };
   }
 
@@ -380,8 +413,11 @@ export const launchCampaign = async (
       else skippedByAddressPolicy += 1;
       continue;
     }
-    /** First-touch copy is classification + location-confidence only (see firstTouchMessageGenerator). */
-    const firstTouch = renderFirstTouchMessage(leadDto);
+    /** First-touch: template baseline; with Claude, rewrite using full lead record from DB. */
+    const firstTouchRendered = generateFirstTouchMessage(leadDto);
+    const firstTouch = isClaudeCopyConfigured()
+      ? (await composeFirstTouchFromFullLeadWithClaude(leadDto, firstTouchRendered.body)) ?? firstTouchRendered.body
+      : firstTouchRendered.body;
     const subject = `Gloria Custom Cabinetry — kitchens & built-ins`;
     const sendResult = await sendOutreachEmail({
       to: lead.email,
@@ -408,6 +444,10 @@ export const launchCampaign = async (
     sentNow += 1;
     const follow1At = new Date(addBusinessDays(now.toISOString(), 2));
     const follow2At = new Date(addBusinessDays(now.toISOString(), 5));
+    const follow1Baseline = generateFollowUp1Message(leadDto, firstTouch);
+    const follow1Body = (await enhanceFollowUp1WithClaude(leadDto, firstTouch, follow1Baseline)) ?? follow1Baseline;
+    const follow2Baseline = generateFollowUp2Message(leadDto);
+    const follow2Body = (await enhanceFollowUp2WithClaude(leadDto, follow2Baseline)) ?? follow2Baseline;
     await db.campaignLead.create({
       data: { id: uid(), campaignId, leadId, assignedAt: now }
     });
@@ -429,7 +469,7 @@ export const launchCampaign = async (
           campaignId,
           direction: "outbound",
           kind: "follow_up_1",
-          body: generateFollowUp1Message(leadDto, firstTouch),
+          body: follow1Body,
           sentAt: follow1At,
           status: "scheduled"
         },
@@ -439,7 +479,7 @@ export const launchCampaign = async (
           campaignId,
           direction: "outbound",
           kind: "follow_up_2",
-          body: generateFollowUp2Message(leadDto),
+          body: follow2Body,
           sentAt: follow2At,
           status: "scheduled"
         }
@@ -474,7 +514,7 @@ export const launchCampaign = async (
     skippedVeryPoor,
     skippedDoNotContact,
     skippedByDeployVerify,
-    dryRun: outreachConfig.dryRun
+    dryRun: dryRunEffective
   };
 };
 

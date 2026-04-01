@@ -127,6 +127,35 @@ model InboundReply {
   campaign                 Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 }
 
+/** Operator corrections vs mock Claude output — injected into system prompts for voice alignment. */
+model VoiceTrainingNote {
+  id               String   @id
+  scenarioKind     String
+  mockClaudeReply  String
+  userCorrection   String
+  createdAt        DateTime @default(now())
+}
+
+/**
+ * Singleton (`id` = "default"). `outreachDryRunOverride` null = use `DRY_RUN` env only;
+ * when true/false, overrides env for all outreach sends (email + owner notify + calendar auto-book).
+ */
+model DashboardRuntimeConfig {
+  id                     String   @id
+  outreachDryRunOverride Boolean?
+  updatedAt              DateTime @updatedAt
+}
+
+/** In-app activity feed (meetings, auto-replies, scheduled sends). */
+model DashboardNotification {
+  id        String    @id
+  kind      String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
 model Booking {
   id                String    @id
   leadId            String

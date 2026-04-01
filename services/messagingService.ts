@@ -15,7 +15,7 @@ import {
   type RenderedFirstTouch
 } from "@/services/firstTouchMessageGenerator";
 import { generateFollowUp1Message, generateFollowUp2Message } from "@/services/followUpMessageGenerator";
-import { draftPricingReply } from "@/services/replyDrafts";
+import { draftPricingReply } from "@/services/replyDraftTemplates";
 import type { FirstTouchClassification, Lead } from "@/types/lead";
 
 const INFO_REPLY_TEMPLATE = `Hi Alex — we design, build, and install custom kitchens and millwork from Hatfield, PA, with an emphasis on fast, reliable execution. Typical lead times depend on scope; I can share a concise timeline and relevant photos on a short call when convenient.`;

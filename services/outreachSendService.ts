@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { outreachConfig } from "@/config/outreachConfig";
+import { getEffectiveOutreachDryRun } from "@/services/outreachDryRunService";
 
 export type SendResult = {
   status: "sent" | "dry_run" | "failed";
@@ -65,7 +66,7 @@ export const sendOutreachEmail = async (payload: {
     intendedTo: payload.intendedTo
   });
 
-  if (outreachConfig.dryRun) {
+  if (await getEffectiveOutreachDryRun()) {
     return { status: "dry_run", finalText };
   }
   if (!resend) {

@@ -17,11 +17,13 @@ const SCENARIO_LABELS: Record<SimulatedScenario, string> = {
 export function SimulationPanel({
   leadId,
   onSimulateInbound,
-  onSimulateBooking
+  onSimulateBooking,
+  onDispatchScheduledDue
 }: {
   leadId: string | null;
   onSimulateInbound: (scenario: SimulatedScenario) => void;
   onSimulateBooking: () => void;
+  onDispatchScheduledDue?: () => void;
 }) {
   const disabled = !leadId;
 
@@ -59,6 +61,25 @@ export function SimulationPanel({
           Simulate booking confirmation
         </button>
       </div>
+
+      {onDispatchScheduledDue ? (
+        <>
+          <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Scheduled follow-ups</p>
+          <p className="mt-1 text-xs text-slate-600">
+            Sends any due <code className="rounded bg-white px-0.5">follow_up_1/2</code> messages (regenerates copy with Claude when
+            configured). Production uses Vercel cron <code className="rounded bg-white px-0.5">/api/cron/outreach-dispatch</code>.
+          </p>
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={onDispatchScheduledDue}
+              className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-950 hover:bg-violet-100"
+            >
+              Run due scheduled sends now (dev)
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

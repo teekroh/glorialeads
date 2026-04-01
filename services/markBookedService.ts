@@ -1,6 +1,7 @@
 import { getBookingLink, getBookingLinkForDisplay } from "@/config/bookingCopy";
 import { db } from "@/lib/db";
 import { uid } from "@/lib/utils";
+import { notifyOwnerMeetingBooked } from "@/services/ownerNotifyService";
 
 export type MarkBookedResult = { ok: true; duplicate?: boolean } | { ok: false; error: string };
 
@@ -72,6 +73,11 @@ export const markBooked = async (
   await db.lead.update({
     where: { id: leadId },
     data: { status: "Booked", updatedAt: now }
+  });
+  void notifyOwnerMeetingBooked({
+    leadName: lead.fullName,
+    leadEmail: lead.email,
+    meetingStartIso: extras?.meetingStart ?? null
   });
   return { ok: true };
 };
