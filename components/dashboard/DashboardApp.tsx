@@ -663,6 +663,7 @@ export function DashboardApp({
   initialOutreachDryRunOverride = null,
   initialNotifications = [],
   initialVoiceTrainingNotes = [],
+  initialOutreachTestToActive = false,
   importSummary
 }: {
   initialLeads: Lead[];
@@ -677,6 +678,7 @@ export function DashboardApp({
   initialOutreachDryRunOverride?: boolean | null;
   initialNotifications?: DashboardNotificationDTO[];
   initialVoiceTrainingNotes?: VoiceTrainingNoteDTO[];
+  initialOutreachTestToActive?: boolean;
   importSummary: ImportSummary;
 }) {
   const vm = useDashboard(
@@ -691,7 +693,8 @@ export function DashboardApp({
     initialOutreachDryRunEnvDefault ?? initialOutreachDryRun,
     initialOutreachDryRunOverride ?? null,
     initialNotifications,
-    initialVoiceTrainingNotes
+    initialVoiceTrainingNotes,
+    initialOutreachTestToActive
   );
 
   type LeadStatFilterAction =
@@ -1087,7 +1090,19 @@ export function DashboardApp({
                     : vm.outreachDryRunOverride
                       ? " · Dashboard override: force dry"
                       : " · Dashboard override: force live"}
+                  {vm.outreachTestToActive ? (
+                    <>
+                      {" "}
+                      · <strong>OUTREACH_TEST_TO</strong> on — outreach Resend <strong>To:</strong> is your test inbox only (not each lead&apos;s address).
+                    </>
+                  ) : null}
                 </span>
+                {!vm.outreachDryRun && vm.outreachTestToActive ? (
+                  <span className="text-[11px] text-slate-700">
+                    Owner meeting alerts still use <code className="rounded bg-white/70 px-1">OWNER_NOTIFY_EMAIL</code> / reply-to. Dev{" "}
+                    <code className="rounded bg-white/70 px-1">/api/test-email</code> uses its own To if enabled.
+                  </span>
+                ) : null}
               </div>
               <label className="flex cursor-pointer items-center gap-2 shrink-0">
                 <span className="text-xs font-medium">Dry run</span>
@@ -1101,9 +1116,13 @@ export function DashboardApp({
                   onChange={async (e) => {
                     const wantDry = e.target.checked;
                     if (!wantDry) {
-                      const ok = window.confirm(
-                        "Turn OFF dry run and send real email via Resend? Leads will receive actual messages. Continue?"
-                      );
+                      const ok = vm.outreachTestToActive
+                        ? window.confirm(
+                            "Turn OFF dry run? Resend will deliver real mail, but OUTREACH_TEST_TO is set — every outreach email goes only to that inbox (not to each lead’s address). Continue?"
+                          )
+                        : window.confirm(
+                            "Turn OFF dry run and send real email via Resend? Leads will receive actual messages at their own addresses. Continue?"
+                          );
                       if (!ok) return;
                     }
                     const r = await vm.setOutreachDryRunMode(wantDry ? "dry" : "live");
@@ -1923,7 +1942,11 @@ export function DashboardApp({
                       : "border-rose-300 bg-rose-50 text-rose-900"
                   }`}
                 >
-                  {vm.outreachDryRun ? "DRY RUN (no sends)" : "LIVE SEND"}
+                  {vm.outreachDryRun
+                    ? "DRY RUN (no sends)"
+                    : vm.outreachTestToActive
+                      ? "LIVE (To: OUTREACH_TEST_TO)"
+                      : "LIVE SEND"}
                 </div>
               </div>
               <p className="mt-1 text-xs text-slate-600">Each launch batch with recipient coverage where tracked.</p>

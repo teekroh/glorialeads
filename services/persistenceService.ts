@@ -267,6 +267,7 @@ export const getDashboardData = async () => {
   const notifications = await listDashboardNotifications(80);
   const voiceTrainingNotes = await listVoiceTrainingNotes(80);
   const dryRunState = await getOutreachDryRunDashboardState();
+  const outreachTestToActive = Boolean(outreachConfig.testToEmail);
 
   return {
     leads: leadsMapped,
@@ -284,7 +285,8 @@ export const getDashboardData = async () => {
     bookingReplyPreview: getBookingReplyTemplate(),
     outreachDryRun: dryRunState.effective,
     outreachDryRunEnvDefault: dryRunState.envDefault,
-    outreachDryRunOverride: dryRunState.override
+    outreachDryRunOverride: dryRunState.override,
+    outreachTestToActive
   };
 };
 

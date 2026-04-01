@@ -69,7 +69,8 @@ export const useDashboard = (
   initialOutreachDryRunEnvDefault = initialOutreachDryRun,
   initialOutreachDryRunOverride: boolean | null = null,
   initialNotifications: DashboardNotificationDTO[] = [],
-  initialVoiceTrainingNotes: VoiceTrainingNoteDTO[] = []
+  initialVoiceTrainingNotes: VoiceTrainingNoteDTO[] = [],
+  initialOutreachTestToActive = false
 ) => {
   const adminApiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? "";
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
@@ -82,6 +83,7 @@ export const useDashboard = (
   const [outreachDryRunEnvDefault, setOutreachDryRunEnvDefault] = useState(initialOutreachDryRunEnvDefault);
   const [outreachDryRunOverride, setOutreachDryRunOverrideState] = useState<boolean | null>(initialOutreachDryRunOverride);
   const [dryRunToggleBusy, setDryRunToggleBusy] = useState(false);
+  const [outreachTestToActive, setOutreachTestToActive] = useState(initialOutreachTestToActive);
   const [filters, setFilters] = useState<Filters>(defaultLeadFilters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
@@ -128,6 +130,7 @@ export const useDashboard = (
     ) {
       setOutreachDryRunOverrideState(data.outreachDryRunOverride);
     }
+    if (typeof data.outreachTestToActive === "boolean") setOutreachTestToActive(data.outreachTestToActive);
     if (Array.isArray(data.notifications)) {
       setNotifications(data.notifications as DashboardNotificationDTO[]);
     }
@@ -476,6 +479,7 @@ export const useDashboard = (
     outreachDryRun,
     outreachDryRunEnvDefault,
     outreachDryRunOverride,
+    outreachTestToActive,
     dryRunToggleBusy,
     setOutreachDryRunMode,
     filtered,
