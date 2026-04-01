@@ -1,6 +1,6 @@
 /**
  * Cal.com event configuration for Gloria’s 15-minute intro funnel.
- * See also: app/setup/cal/page.tsx (operator-facing setup guide).
+ * Reference for event naming and BOOKING_LINK; /setup/cal redirects to the dashboard.
  *
  * Target event
  * - Name: Cabinet Project Intro Call

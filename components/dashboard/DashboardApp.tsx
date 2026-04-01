@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { appConfig } from "@/config/appConfig";
 import { ImportSummary } from "@/data/importLeads";
@@ -220,85 +219,91 @@ function InboxChatColumn({
               <span className="font-semibold text-slate-700">Provenance:</span> {clip(inboxLead.sourceDetail, 200)}
             </p>
 
-            <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div>
-                <p className="text-[11px] font-semibold text-slate-700">Last outbound</p>
-                <p className="mt-1 text-xs text-slate-700 whitespace-pre-wrap">{selectedThread.lastOutboundSnippet}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold text-slate-700">Their reply</p>
-                <p className="mt-1 text-xs text-slate-700 whitespace-pre-wrap">{selectedThread.inboundSnippet}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="rounded-md bg-stone-100 px-2 py-0.5 text-[11px] font-medium capitalize text-brand-ink">
-                  {selectedThread.classification.replace(/_/g, " ")}
-                </span>
-                <span className="text-[11px] text-slate-600">{(selectedThread.confidence * 100).toFixed(0)}% model confidence</span>
-              </div>
-              <p className="text-[11px] text-slate-600">Next step: {selectedThread.recommendedNext}</p>
-            </div>
-
-            {inboxLead.latestInbound?.needsReview && (
-              <div className="mt-3 space-y-2 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm">
-                <p className="font-medium text-orange-900">Review queue</p>
-                <AutomationAuditBadges
-                  needsReview={inboxLead.latestInbound.needsReview}
-                  automationAllowed={inboxLead.latestInbound.automationAllowed ?? false}
-                  automationBlockedReason={inboxLead.latestInbound.automationBlockedReason}
-                  mixedIntent={inboxLead.latestInbound.mixedIntent}
-                />
-                <p className="text-[11px] text-slate-700">{inboxLead.latestInbound.classificationReason}</p>
-                {inboxLead.latestInbound.suggestedReplyDraft && (
-                  <div className="max-h-36 overflow-y-auto rounded border border-orange-100 bg-white p-2 text-xs whitespace-pre-wrap text-brand-ink/90">
-                    {inboxLead.latestInbound.suggestedReplyDraft}
-                  </div>
-                )}
-                <textarea
-                  className="w-full rounded border border-orange-200 bg-white p-2 text-xs"
-                  rows={4}
-                  value={reviewEdit || inboxLead.latestInbound?.suggestedReplyDraft || ""}
-                  onChange={(e) => setReviewEdit(e.target.value)}
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-brand-ink hover:bg-brand-dark"
-                    onClick={() => {
-                      const d = inboxLead.latestInbound?.suggestedReplyDraft || "";
-                      void vm.sendReviewReply(inboxLead.id, d, inboxLead.latestInbound?.id);
-                    }}
-                  >
-                    Approve &amp; send
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-orange-400 bg-white px-3 py-1.5 text-xs font-semibold text-orange-900"
-                    onClick={() =>
-                      void vm.sendReviewReply(
-                        inboxLead.id,
-                        reviewEdit || inboxLead.latestInbound?.suggestedReplyDraft || "",
-                        inboxLead.latestInbound?.id
-                      )
-                    }
-                  >
-                    Edit &amp; send
-                  </button>
-                  <input
-                    type="date"
-                    className="rounded border px-2 py-1 text-xs"
-                    onChange={(e) => e.target.value && void vm.snoozeLeadClient(inboxLead.id, new Date(e.target.value).toISOString())}
-                  />
-                  <span className="self-center text-[10px] text-slate-600">Snooze</span>
-                  <button
-                    type="button"
-                    className="rounded-md border border-rose-200 px-3 py-1.5 text-xs text-rose-800"
-                    onClick={() => void vm.markNotInterestedClient(inboxLead.id)}
-                  >
-                    Not interested
-                  </button>
+            <div className="mt-3 flex min-h-0 flex-col gap-3 md:flex-row md:items-stretch">
+              <div className="grid min-h-0 min-w-0 flex-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div>
+                  <p className="text-[11px] font-semibold text-slate-700">Last outbound</p>
+                  <p className="mt-1 max-h-28 overflow-y-auto text-xs text-slate-700 whitespace-pre-wrap">
+                    {selectedThread.lastOutboundSnippet}
+                  </p>
                 </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-slate-700">Their reply (last inbound)</p>
+                  <p className="mt-1 max-h-40 overflow-y-auto text-xs text-slate-700 whitespace-pre-wrap">
+                    {selectedThread.inboundSnippet}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-2">
+                  <span className="rounded-md bg-stone-100 px-2 py-0.5 text-[11px] font-medium capitalize text-brand-ink">
+                    {selectedThread.classification.replace(/_/g, " ")}
+                  </span>
+                  <span className="text-[11px] text-slate-600">{(selectedThread.confidence * 100).toFixed(0)}% model confidence</span>
+                </div>
+                <p className="text-[11px] text-slate-600">Next step: {selectedThread.recommendedNext}</p>
               </div>
-            )}
+
+              {inboxLead.latestInbound?.needsReview ? (
+                <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col space-y-2 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm md:max-w-[min(100%,480px)] md:shrink-0">
+                  <p className="font-medium text-orange-900">Review queue</p>
+                  <AutomationAuditBadges
+                    needsReview={inboxLead.latestInbound.needsReview}
+                    automationAllowed={inboxLead.latestInbound.automationAllowed ?? false}
+                    automationBlockedReason={inboxLead.latestInbound.automationBlockedReason}
+                    mixedIntent={inboxLead.latestInbound.mixedIntent}
+                  />
+                  <p className="text-[11px] text-slate-700">{inboxLead.latestInbound.classificationReason}</p>
+                  {inboxLead.latestInbound.suggestedReplyDraft && (
+                    <div className="max-h-28 overflow-y-auto rounded border border-orange-100 bg-white p-2 text-xs whitespace-pre-wrap text-brand-ink/90">
+                      {inboxLead.latestInbound.suggestedReplyDraft}
+                    </div>
+                  )}
+                  <textarea
+                    className="min-h-[88px] w-full shrink-0 rounded border border-orange-200 bg-white p-2 text-xs"
+                    rows={4}
+                    value={reviewEdit || inboxLead.latestInbound?.suggestedReplyDraft || ""}
+                    onChange={(e) => setReviewEdit(e.target.value)}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-brand-ink hover:bg-brand-dark"
+                      onClick={() => {
+                        const d = inboxLead.latestInbound?.suggestedReplyDraft || "";
+                        void vm.sendReviewReply(inboxLead.id, d, inboxLead.latestInbound?.id);
+                      }}
+                    >
+                      Approve &amp; send
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md border border-orange-400 bg-white px-3 py-1.5 text-xs font-semibold text-orange-900"
+                      onClick={() =>
+                        void vm.sendReviewReply(
+                          inboxLead.id,
+                          reviewEdit || inboxLead.latestInbound?.suggestedReplyDraft || "",
+                          inboxLead.latestInbound?.id
+                        )
+                      }
+                    >
+                      Edit &amp; send
+                    </button>
+                    <input
+                      type="date"
+                      className="rounded border px-2 py-1 text-xs"
+                      onChange={(e) => e.target.value && void vm.snoozeLeadClient(inboxLead.id, new Date(e.target.value).toISOString())}
+                    />
+                    <span className="self-center text-[10px] text-slate-600">Snooze</span>
+                    <button
+                      type="button"
+                      className="rounded-md border border-rose-200 px-3 py-1.5 text-xs text-rose-800"
+                      onClick={() => void vm.markNotInterestedClient(inboxLead.id)}
+                    >
+                      Not interested
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
@@ -660,9 +665,6 @@ export function DashboardApp({
                 {v}
               </button>
             ))}
-            <Link href="/setup/cal" className="block rounded px-3 py-2 text-left text-stone-300 hover:bg-brand-inkLight hover:text-white">
-              Cal.com setup
-            </Link>
             <button
               type="button"
               onClick={() => setLiteMode((v) => !v)}
@@ -674,24 +676,24 @@ export function DashboardApp({
             >
               {liteMode ? "Lite mode: Inbox + Bookings" : "Switch to Lite mode"}
             </button>
+            <button
+              type="button"
+              onClick={exportData}
+              className="mt-2 block w-full rounded border border-white/20 px-3 py-2 text-left text-xs font-medium text-stone-200 hover:bg-brand-inkLight hover:text-white"
+            >
+              Export (includes source)
+            </button>
           </nav>
         </aside>
 
         <main className="p-4">
-          <header className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-4">
-            <div>
-              <h1 className="text-xl font-semibold text-brand-ink">Lead Ops Command Center</h1>
-              <p className="text-sm text-brand-ink/65">Qualified lead launcher, reply triage, and remote intro booking flow.</p>
-            </div>
-            <button onClick={exportData} className="rounded bg-brand-ink px-3 py-2 text-sm font-semibold text-white hover:bg-brand-inkLight">Export (Includes Source)</button>
-          </header>
           {!vm.bookingLinkConfigured && (
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
               <p className="font-semibold">BOOKING_LINK not configured</p>
               <p className="mt-1 text-xs">
-                Set <code className="rounded bg-white/80 px-1">BOOKING_LINK</code> in <code className="rounded bg-white/80 px-1">.env.local</code> to your real
-                Cal.com URL (see <Link href="/setup/cal" className="font-medium underline">Cal.com setup</Link>). Until then, booking automation is blocked and
-                drafts show a placeholder. Check server logs for warnings.
+                Set <code className="rounded bg-white/80 px-1">BOOKING_LINK</code> (and optionally{" "}
+                <code className="rounded bg-white/80 px-1">NEXT_PUBLIC_BOOKING_LINK</code>) in your environment to your public Cal.com event URL. Until then,
+                booking automation is blocked and drafts show a placeholder.
               </p>
             </div>
           )}
@@ -1381,21 +1383,8 @@ export function DashboardApp({
                   First-touch location lines only when addr ≥ 86 or CRM/enrichment location trust is high.
                 </p>
               </div>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-brand-ink">Dashboard</h2>
-                  <p className="text-xs text-slate-600">
-                    <strong>Active leads</strong> replied and are still in play. <strong>Retire to lost</strong> marks them not interested (or DNC) and moves them to{" "}
-                    <strong>Lost leads</strong>. <strong>Lead pool</strong> has no reply yet. Open a row to jump to <strong>Leads</strong> with that contact selected for outreach, or to <strong>Inbox</strong> when they need review.
-                  </p>
-                </div>
-                <div className="text-right text-xs text-slate-600">
-                  <div>Active: {dashboardActiveLeads.length}</div>
-                  <div>Lost: {dashboardLostLeads.length}</div>
-                </div>
-              </div>
 
-              <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-100 pb-3">
+              <div className="mt-3 flex flex-wrap gap-2 border-b border-slate-100 pb-3">
                 <button
                   type="button"
                   onClick={() => setDashboardTab("active")}
