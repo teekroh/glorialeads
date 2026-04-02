@@ -1,10 +1,12 @@
 import { mapDbLeadToLead } from "@/lib/mappers";
 import { db } from "@/lib/db";
+import { outreachConfig } from "@/config/outreachConfig";
 import { isClaudeCopyConfigured } from "@/config/claudeConfig";
 import { composeFollowUpFromThreadWithClaude } from "@/services/claudeCopyService";
 import { createDashboardNotification } from "@/services/dashboardNotificationService";
 import { sendOutreachEmail } from "@/services/outreachSendService";
 import type { Lead } from "@/types/lead";
+import { getRemainingRealOutboundQuota, sleep } from "@/services/outreachRateLimiter";
 
 async function buildConversationTranscript(leadId: string): Promise<string> {
   const rows = await db.message.findMany({
@@ -30,11 +32,14 @@ async function firstTouchExcerpt(leadId: string): Promise<string> {
   return (m?.body ?? "").slice(0, 1200);
 }
 
-export async function dispatchDueScheduledOutreach(limit = 30): Promise<{ dispatched: number; skipped: number; errors: string[] }> {
+export async function dispatchDueScheduledOutreach(
+  limit = outreachConfig.scheduledDispatchBatchLimit
+): Promise<{ dispatched: number; skipped: number; skippedByDailyCap: number; errors: string[] }> {
   const now = new Date();
   const errors: string[] = [];
   let dispatched = 0;
   let skipped = 0;
+  let skippedByDailyCap = 0;
 
   const due = await db.message.findMany({
     where: {
@@ -49,6 +54,12 @@ export async function dispatchDueScheduledOutreach(limit = 30): Promise<{ dispat
 
   for (const msg of due) {
     try {
+      const remainingQuota = await getRemainingRealOutboundQuota(now);
+      if (remainingQuota <= 0) {
+        skippedByDailyCap += 1;
+        continue;
+      }
+
       const leadRow = await db.lead.findUnique({ where: { id: msg.leadId } });
       if (!leadRow) {
         skipped += 1;
@@ -136,6 +147,9 @@ export async function dispatchDueScheduledOutreach(limit = 30): Promise<{ dispat
           title: `Follow-up ${sequence} sent · ${leadRow.fullName}`,
           body: send.status === "dry_run" ? "[Dry run] " + body.slice(0, 280) : body.slice(0, 400)
         });
+        if (send.status === "sent" && outreachConfig.outboundSendMinIntervalMs > 0) {
+          await sleep(outreachConfig.outboundSendMinIntervalMs);
+        }
       } else {
         errors.push(`${msg.id}: ${send.error ?? "send failed"}`);
       }
@@ -144,5 +158,5 @@ export async function dispatchDueScheduledOutreach(limit = 30): Promise<{ dispat
     }
   }
 
-  return { dispatched, skipped, errors };
+  return { dispatched, skipped, skippedByDailyCap, errors };
 }

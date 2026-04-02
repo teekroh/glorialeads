@@ -18,6 +18,12 @@ export const outreachConfig = {
   dryRun: (process.env.DRY_RUN ?? "true").toLowerCase() === "true",
   dailySendLimit: toInt(process.env.DAILY_SEND_LIMIT, 20),
   campaignSendLimit: toInt(process.env.CAMPAIGN_SEND_LIMIT, 10),
+  /** Hard cap on all real outbound sends per business day (first touch, follow-ups, auto-replies). */
+  dailyOutboundTotalLimit: toInt(process.env.DAILY_OUTBOUND_TOTAL_LIMIT, 40),
+  /** Minimum delay between consecutive real sends in scheduled follow-up dispatch (reduces burst rate). */
+  outboundSendMinIntervalMs: Math.max(0, toInt(process.env.OUTBOUND_SEND_MIN_INTERVAL_MS, 2500)),
+  /** Default batch size for cron / dispatch (each item may still be skipped by daily cap). */
+  scheduledDispatchBatchLimit: toInt(process.env.SCHEDULED_DISPATCH_BATCH_LIMIT, 10),
   /** If set, first-touch sends go here and the body notes the intended lead email (safe testing). */
   testToEmail: (process.env.OUTREACH_TEST_TO ?? "").trim().toLowerCase()
 };

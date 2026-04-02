@@ -18,7 +18,7 @@ import { Lead, LeadSource, LeadStatus, LeadType, PriorityTier } from "@/types/le
 import type { DashboardNotificationDTO } from "@/services/dashboardNotificationService";
 import type { VoiceTrainScenarioKind } from "@/config/voiceTrainScenarios";
 import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
-import { compareLeadsByPipelinePriority } from "@/services/scoringService";
+import { compareLeadsForLibrary } from "@/services/scoringService";
 
 export type AddressQuickFilter = "all" | "verified_86" | "reachable_71" | "needs_review_under_71";
 
@@ -186,7 +186,7 @@ export const useDashboard = (
       if (Number.isFinite(maxN) && (ascore === null || ascore > maxN)) return false;
       return true;
     });
-    out.sort(compareLeadsByPipelinePriority);
+    out.sort(compareLeadsForLibrary);
     return out;
   }, [filters, leads]);
 

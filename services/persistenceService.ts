@@ -28,6 +28,11 @@ import {
 import { deployVerifySendGate, isEligibleForCampaignSend } from "@/services/deployVerifyPolicy";
 import { listVoiceTrainingNotes } from "@/services/voiceTrainingStorage";
 import { getEffectiveOutreachDryRun, getOutreachDryRunDashboardState } from "@/services/outreachDryRunService";
+import {
+  countRealOutboundSendsSince,
+  getOutreachCountingDayStart,
+  sleep as outreachSendPacingSleep
+} from "@/services/outreachRateLimiter";
 
 const OWNER_LEAD_ID = "lead-owner-tim-kroh";
 
@@ -379,19 +384,20 @@ export const launchCampaign = async (
     }
   });
 
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
+  const dayStart = getOutreachCountingDayStart(now);
   const sentToday = await db.message.count({
     where: {
       direction: "outbound",
       kind: "first_touch",
       status: { in: ["sent", "dry_run"] },
-      sentAt: { gte: startOfDay }
+      sentAt: { gte: dayStart }
     }
   });
+  const realSentTodayBeforeLaunch = await countRealOutboundSendsSince(dayStart);
   const availableDaily = Math.max(0, outreachConfig.dailySendLimit - sentToday);
   const availableCampaign = Math.max(0, outreachConfig.campaignSendLimit);
   let sentNow = 0;
+  let realSentThisLaunch = 0;
   let skippedByLimit = 0;
   let skippedByAddressPolicy = 0;
   let skippedVeryPoor = 0;
@@ -399,7 +405,9 @@ export const launchCampaign = async (
   let skippedByDeployVerify = 0;
 
   for (const leadId of uniqueIds) {
-    if (sentNow >= availableCampaign || sentNow >= availableDaily) {
+    const remainingTotalQuota =
+      outreachConfig.dailyOutboundTotalLimit - realSentTodayBeforeLaunch - realSentThisLaunch;
+    if (sentNow >= availableCampaign || sentNow >= availableDaily || remainingTotalQuota <= 0) {
       skippedByLimit += 1;
       continue;
     }
@@ -450,6 +458,12 @@ export const launchCampaign = async (
     }
 
     sentNow += 1;
+    if (sendResult.status === "sent") {
+      realSentThisLaunch += 1;
+      if (outreachConfig.outboundSendMinIntervalMs > 0) {
+        await outreachSendPacingSleep(outreachConfig.outboundSendMinIntervalMs);
+      }
+    }
     const follow1At = new Date(addBusinessDays(now.toISOString(), 2));
     const follow2At = new Date(addBusinessDays(now.toISOString(), 5));
     const follow1Baseline = generateFollowUp1Message(leadDto, firstTouch);

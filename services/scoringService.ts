@@ -131,6 +131,17 @@ export function compareLeadsByPipelinePriority(
   return a.id.localeCompare(b.id);
 }
 
+/** Lead library: Verify-approved leads first, then score / type / name. */
+export function compareLeadsForLibrary(
+  a: Pick<Lead, "id" | "score" | "fullName" | "leadType" | "deployVerifyVerdict">,
+  b: Pick<Lead, "id" | "score" | "fullName" | "leadType" | "deployVerifyVerdict">
+): number {
+  const va = a.deployVerifyVerdict === "approved" ? 0 : 1;
+  const vb = b.deployVerifyVerdict === "approved" ? 0 : 1;
+  if (va !== vb) return va - vb;
+  return compareLeadsByPipelinePriority(a, b);
+}
+
 /** Verify queue: newest leads first (e.g. daily Places batch), then score / type / name. */
 export function compareVerifyQueue(
   a: Pick<Lead, "id" | "score" | "fullName" | "leadType" | "createdAt">,

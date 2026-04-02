@@ -16,6 +16,7 @@ import {
 } from "@/services/claudeCopyService";
 import { buildAutomatedReplyDraft, draftSuggestedTimeReply } from "@/services/replyDrafts";
 import { sendOutreachEmail } from "@/services/outreachSendService";
+import { getRemainingRealOutboundQuota } from "@/services/outreachRateLimiter";
 import { tryAutoBookSuggestedTime } from "@/services/googleCalendarBookingService";
 import { markBooked } from "@/services/markBookedService";
 import { Lead, LeadStatus, ReplyCategory } from "@/types/lead";
@@ -39,6 +40,7 @@ async function tryClaudeGatedAutoSend(params: {
   suggestedReplyDraft: string | null;
 }): Promise<{ ok: true; body: string; rationale: string } | { ok: false }> {
   if (!replyAutomationConfig.claudeAutoSendEnabled || !isClaudeCopyConfigured()) return { ok: false };
+  if ((await getRemainingRealOutboundQuota()) <= 0) return { ok: false };
   if (params.raw.mixedIntent) return { ok: false };
   if (!params.suggestedReplyDraft?.trim()) return { ok: false };
   if (!CLAUDE_GATED_AUTO_CLASSIFICATIONS.includes(params.classification)) return { ok: false };
@@ -327,7 +329,8 @@ export async function processInboundEmail(
     replyAutomationConfig.allowAutoSendPricingReply &&
     raw.confidence >= replyAutomationConfig.autoSendPricingMinConfidence &&
     !raw.mixedIntent &&
-    bookingLinkPresent
+    bookingLinkPresent &&
+    (await getRemainingRealOutboundQuota()) > 0
   ) {
     const body = suggestedReplyDraft;
     if (!body) return { ok: false, error: "No pricing reply draft" };
@@ -389,6 +392,23 @@ export async function processInboundEmail(
       });
 
       if (booked.ok) {
+        if ((await getRemainingRealOutboundQuota()) <= 0) {
+          suggestedReplyDraft = googleResult.replyText;
+          actions.push("suggested_time:auto_google_calendar", "status:Booked", "outbound_confirmation:skipped_daily_cap");
+          await persistInbound({
+            needsReview: true,
+            autoActionTaken: JSON.stringify(actions),
+            automationAllowed: false,
+            automationBlockedReason:
+              "Daily outbound limit reached; the meeting was booked but the confirmation email was not sent."
+          });
+          await db.lead.update({
+            where: { id: lead.id },
+            data: { status: "Booked", updatedAt: new Date() }
+          });
+          return { ok: true, inboundReplyId: inboundId, classification };
+        }
+
         const send = await sendOutreachEmail({
           to: lead.email,
           subject: "Re: Time confirmed",
@@ -425,7 +445,8 @@ export async function processInboundEmail(
     if (
       replyAutomationConfig.autoSuggestedTimeFallbackCalLink &&
       bookingLinkPresent &&
-      !(googleResult.handled && googleResult.mode === "google_calendar")
+      !(googleResult.handled && googleResult.mode === "google_calendar") &&
+      (await getRemainingRealOutboundQuota()) > 0
     ) {
       const body = suggestedReplyDraft ?? draftSuggestedTimeReply(leadDto, payload.bodyText);
       const send = await sendOutreachEmail({
@@ -496,6 +517,14 @@ export async function processInboundEmail(
         break;
       }
       if (canAutoBook) {
+        if ((await getRemainingRealOutboundQuota()) <= 0) {
+          actions.push("booking_invite:blocked_daily_cap", "status:Needs Review");
+          nextStatus = "Needs Review";
+          needsReview = true;
+          automationAllowed = false;
+          automationBlockedReason = "Daily outbound limit reached.";
+          break;
+        }
         actions.push("booking_automation:eligible");
         await db.message.create({
           data: {

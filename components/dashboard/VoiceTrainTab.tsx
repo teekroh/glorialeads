@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { VOICE_TRAIN_SCENARIOS, type VoiceTrainScenarioKind } from "@/config/voiceTrainScenarios";
 import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
 import type { Lead } from "@/types/lead";
-import { compareLeadsByPipelinePriority } from "@/services/scoringService";
+import { compareLeadsForLibrary } from "@/services/scoringService";
 
 const SCENARIO_LABELS: Record<VoiceTrainScenarioKind, string> = {
   first_touch: "Cold first touch",
@@ -44,7 +44,7 @@ export function VoiceTrainTab({
     () =>
       [...leads]
         .filter((l) => !l.doNotContact)
-        .sort(compareLeadsByPipelinePriority)
+        .sort(compareLeadsForLibrary)
         .slice(0, 80),
     [leads]
   );

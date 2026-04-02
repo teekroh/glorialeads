@@ -28,7 +28,7 @@ import { SimulationPanel } from "@/components/dashboard/SimulationPanel";
 import { VoiceTrainTab } from "@/components/dashboard/VoiceTrainTab";
 import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
 import { VerifyWorkbench } from "@/components/dashboard/VerifyWorkbench";
-import { compareLeadsByPipelinePriority } from "@/services/scoringService";
+import { compareLeadsForLibrary } from "@/services/scoringService";
 import { AutomationAuditBadges } from "@/components/ui/HandlingBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
 import { BookingStatusBadge, StatusBadge } from "@/components/ui/StatusBadge";
@@ -752,7 +752,7 @@ export function DashboardApp({
   useEffect(() => {
     if (!vm.leads.length) return;
     if (simulationLeadId && vm.leads.some((l) => l.id === simulationLeadId)) return;
-    const top = [...vm.leads].sort(compareLeadsByPipelinePriority)[0];
+    const top = [...vm.leads].sort(compareLeadsForLibrary)[0];
     setSimulationLeadId(top?.id ?? null);
   }, [vm.leads, simulationLeadId]);
   const [campaignName, setCampaignName] = useState("Kitchen Intro Sprint");
@@ -1012,7 +1012,7 @@ export function DashboardApp({
     () =>
       [...vm.leads]
         .filter((l) => !l.doNotContact)
-        .sort(compareLeadsByPipelinePriority)
+        .sort(compareLeadsForLibrary)
         .slice(0, 8),
     [vm.leads]
   );
@@ -1421,7 +1421,7 @@ export function DashboardApp({
                     <div>
                       <h2 className="text-lg font-semibold text-brand-ink">Lead library</h2>
                       <p className="mt-0.5 text-xs text-slate-600">
-                        Sorted by <strong>score</strong> (homeowners are capped below all trade types; ties use designer → builder → architect). Filter, multi-select with checkboxes, preview first-touch
+                        <strong>Verify-approved</strong> leads first, then <strong>score</strong> (homeowners below trade types; designer → builder → architect). Filter, multi-select with checkboxes, preview first-touch
                         copy, and launch campaigns to the selected audience.
                       </p>
                     </div>
@@ -2137,7 +2137,7 @@ export function DashboardApp({
                       value={simulationLeadId ?? ""}
                       onChange={(e) => setSimulationLeadId(e.target.value || null)}
                     >
-                      {[...vm.leads].sort(compareLeadsByPipelinePriority).map((l) => (
+                      {[...vm.leads].sort(compareLeadsForLibrary).map((l) => (
                         <option key={l.id} value={l.id}>
                           {l.fullName} · score {l.score} · {l.email}
                         </option>

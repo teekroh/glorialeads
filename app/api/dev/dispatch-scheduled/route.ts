@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { outreachConfig } from "@/config/outreachConfig";
 import { blockInProductionUnlessEnabled, requireAdminApiKey } from "@/lib/apiRouteSecurity";
 import { dispatchDueScheduledOutreach } from "@/services/scheduledOutreachDispatchService";
 
@@ -8,7 +9,8 @@ export async function POST(request: Request) {
   const authErr = requireAdminApiKey(request);
   if (authErr) return authErr;
   const body = await request.json().catch(() => ({}));
-  const limit = Math.min(50, Math.max(1, Number(body.limit) || 20));
+  const maxBatch = Math.max(outreachConfig.scheduledDispatchBatchLimit, 25);
+  const limit = Math.min(maxBatch, Math.max(1, Number(body.limit) || outreachConfig.scheduledDispatchBatchLimit));
   const result = await dispatchDueScheduledOutreach(limit);
   return NextResponse.json({ ok: true, ...result });
 }
