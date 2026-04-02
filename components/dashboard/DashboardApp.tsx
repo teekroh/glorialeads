@@ -69,10 +69,12 @@ function bookingRecordSortRank(b: Lead["bookingHistory"][number]): number {
   return 0;
 }
 
-/** Omit invite-only rows once a `booked` row exists — avoids a fake “pending” chip on the invite-send day/time. */
+/**
+ * Calendar data only — never show invite-sent rows. Tentative slots and taken times live in Cal.com until we
+ * persist a confirmed `booked` row with a real `meetingStart` (webhook/sync). Avoids misleading “pending” chips.
+ */
 function bookingHistoryForCalendarDisplay(lead: Lead): Lead["bookingHistory"] {
   const rows = lead.bookingHistory ?? [];
-  if (!rows.some((b) => b.status === "booked")) return rows;
   return rows.filter((b) => b.status !== "booking_sent");
 }
 
@@ -183,7 +185,7 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
         <div>
           <h3 className="text-base font-semibold text-brand-ink">Bookings calendar · {monthLabel}</h3>
           <p className="mt-1 text-xs text-slate-600">
-            Scheduled meeting time when Cal provides it; otherwise the day the invite or confirmation was recorded.
+            Confirmed meetings in Gloria only. Invite-sent / “pick a time” state stays on the lead row — availability is in Cal.com until we store a booked time.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1">
@@ -239,7 +241,9 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
           )
         )}
       </div>
-      {!events.length ? <p className="mt-3 text-sm text-slate-500">No booking activity with a date in {monthLabel}.</p> : null}
+      {!events.length ? (
+        <p className="mt-3 text-sm text-slate-500">No confirmed meetings in {monthLabel}. Pending invites are not shown here.</p>
+      ) : null}
     </section>
   );
 }
@@ -418,7 +422,7 @@ function BookingsPageCalendar({
         <div>
           <h3 className="text-base font-semibold text-brand-ink">Live calendar</h3>
           <p className="mt-1 text-xs text-slate-600">
-            Uses the real meeting start from Cal when present; otherwise the confirmation or invite timestamp for day placement. Click an entry for details.
+            Confirmed times Gloria has recorded only — not pending invites (Cal.com reflects open vs taken slots). Click an entry for details.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -448,11 +452,11 @@ function BookingsPageCalendar({
             </button>
           </div>
           <p className="text-xs text-slate-500">
-            <span className="mr-2 inline-flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-full bg-amber-400" /> Pending
-            </span>
             <span className="inline-flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> Confirmed
+            </span>
+            <span className="ml-2 inline-flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-slate-400" /> Closed
             </span>
           </p>
         </div>
@@ -2246,7 +2250,9 @@ export function DashboardApp({
                   ) : null}
                 </details>
                 {!bookingInviteList.length ? (
-                  <p className="card text-sm text-slate-500">No booking records yet. Send a booking invite or simulate confirmation from the Simulation tab.</p>
+                  <p className="card text-sm text-slate-500">
+                    No confirmed or closed bookings in Gloria yet. Invite-only leads stay on the <strong>Leads</strong> / <strong>Dashboard</strong> rows — use Cal.com for who picked a slot until a webhook stores the time here.
+                  </p>
                 ) : null}
               </div>
             </section>
