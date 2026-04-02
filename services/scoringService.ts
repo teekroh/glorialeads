@@ -131,13 +131,15 @@ export function compareLeadsByPipelinePriority(
   return a.id.localeCompare(b.id);
 }
 
-/** Lead library: Verify-approved leads first, then score / type / name. */
+/** Lead library: Approved first, then pending verify, then rejected (last). Within each band: score / type / name. */
 export function compareLeadsForLibrary(
   a: Pick<Lead, "id" | "score" | "fullName" | "leadType" | "deployVerifyVerdict">,
   b: Pick<Lead, "id" | "score" | "fullName" | "leadType" | "deployVerifyVerdict">
 ): number {
-  const va = a.deployVerifyVerdict === "approved" ? 0 : 1;
-  const vb = b.deployVerifyVerdict === "approved" ? 0 : 1;
+  const verifyBand = (v: Lead["deployVerifyVerdict"] | null | undefined) =>
+    v === "approved" ? 0 : v === "rejected" ? 2 : 1;
+  const va = verifyBand(a.deployVerifyVerdict);
+  const vb = verifyBand(b.deployVerifyVerdict);
   if (va !== vb) return va - vb;
   return compareLeadsByPipelinePriority(a, b);
 }

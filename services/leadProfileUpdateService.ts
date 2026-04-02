@@ -2,7 +2,11 @@ import { db } from "@/lib/db";
 import { LEAD_PROFILE_TYPES } from "@/lib/leadProfileDraft";
 import { normalizeWebsiteHost } from "@/services/placesLeadDiscoveryService";
 import { scoreLeadBase } from "@/services/scoringService";
-import type { LeadSource, LeadType } from "@/types/lead";
+import type { LeadSource, LeadType, PriorityTier } from "@/types/lead";
+
+/** Rejected in Verify: force last place in score-based sorts (trade types otherwise stay Tier B/C from floors). */
+const VERIFY_REJECTED_SCORE = 0;
+const VERIFY_REJECTED_TIER: PriorityTier = "Tier D";
 
 function normalizeEmailInput(value: string): string | null {
   const t = value.trim().toLowerCase();
@@ -102,6 +106,17 @@ export async function applyLeadProfileUpdate(
     leadType: leadTypeRaw
   });
 
+  const rejectedVerify = options?.deployVerifyVerdict === "rejected";
+  const score = rejectedVerify ? VERIFY_REJECTED_SCORE : scored.score;
+  const conversionScore = rejectedVerify ? VERIFY_REJECTED_SCORE : scored.conversionScore;
+  const projectFitScore = rejectedVerify ? VERIFY_REJECTED_SCORE : scored.projectFitScore;
+  const priorityTier = rejectedVerify ? VERIFY_REJECTED_TIER : scored.priorityTier;
+  const isoDate = new Date().toISOString().slice(0, 10);
+  const rejectNote = `[Verify ${isoDate}] Rejected — demoted to ${VERIFY_REJECTED_TIER} (sorted to back of list).`;
+  const confidenceNotesOut = rejectedVerify
+    ? [existing.confidenceNotes?.trim(), rejectNote].filter(Boolean).join(" \n")
+    : existing.confidenceNotes ?? "";
+
   const fullNameOut = names.fullName || `${names.firstName} ${names.lastName}`.trim();
 
   await db.lead.update({
@@ -120,12 +135,13 @@ export async function applyLeadProfileUpdate(
       leadType: leadTypeRaw,
       websiteUri: websiteUriOut,
       websiteHost: websiteHostOut,
-      score: scored.score,
-      conversionScore: scored.conversionScore,
-      projectFitScore: scored.projectFitScore,
+      score,
+      conversionScore,
+      projectFitScore,
       estimatedProjectTier: scored.estimatedProjectTier,
-      priorityTier: scored.priorityTier,
+      priorityTier,
       scoreBreakdownJson: JSON.stringify(scored.breakdown),
+      confidenceNotes: confidenceNotesOut,
       ...(options?.deployVerifyVerdict !== undefined
         ? { deployVerifyVerdict: options.deployVerifyVerdict }
         : {}),

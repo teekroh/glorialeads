@@ -58,24 +58,6 @@ const INBOX_TABS = ["Interested", "Booking Sent", "Needs Review", "Not Now", "Su
 /** Sidebar order: Dashboard → Inbox → Train → Campaigns → Bookings → Leads → Verify → Simulation */
 const SIDEBAR_VIEWS = ["dashboard", "inbox", "train", "campaigns", "bookings", "leads", "verify", "simulation"] as const;
 
-const LIVE_SEND_BLOCKED_HELP =
-  "Dry run is still enforced by the server environment (DRY_RUN defaults to on when unset).\n\n" +
-  "In Vercel: Project → Settings → Environment Variables — add one of these for the target environment (Production / Preview), then redeploy:\n\n" +
-  "• OUTREACH_TEST_TO — your inbox email. Resend delivers every outreach only there (safest).\n\n" +
-  "• ALLOW_DASHBOARD_LIVE_SEND — true. Allows turning off dry run here so mail can go to real lead addresses.\n\n" +
-  "• DRY_RUN — false. App defaults to live sends (be careful on production).";
-
-function alertOutreachDryRunToggleFailure(
-  r: { error?: string; code?: string; status?: number },
-  gloriaAlert: (message: string, title?: string) => Promise<void>
-) {
-  if (r.code === "dry_run_guard") {
-    void gloriaAlert(LIVE_SEND_BLOCKED_HELP, "Can’t go live yet");
-    return;
-  }
-  void gloriaAlert(r.error ?? "Request failed.", "Dry run mode");
-}
-
 function inboxTabMatches(thread: InboxThread, lead: Lead | undefined, tab: (typeof INBOX_TABS)[number]): boolean {
   if (!lead) return false;
   if (tab === "Interested") return lead.status === "Interested";
@@ -1200,7 +1182,7 @@ function DashboardAppInner({
                       if (!ok) return;
                       const r = await vm.setOutreachDryRunMode("live");
                       if (!r.ok && (r.error || r.code)) {
-                        alertOutreachDryRunToggleFailure(r, gloriaAlert);
+                        void gloriaAlert(r.error ?? "Request failed.", "Dry run mode");
                       }
                     })();
                   }
@@ -1210,7 +1192,7 @@ function DashboardAppInner({
                   void (async () => {
                     const r = await vm.setOutreachDryRunMode("dry");
                     if (!r.ok && (r.error || r.code)) {
-                      alertOutreachDryRunToggleFailure(r, gloriaAlert);
+                      void gloriaAlert(r.error ?? "Request failed.", "Dry run mode");
                     }
                   })();
                 }}
