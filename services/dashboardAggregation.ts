@@ -1,5 +1,6 @@
 import type { Booking, Campaign, FollowUp, InboundReply, Lead as DbLead, Message } from "@prisma/client";
 import { mapDbLeadToLead } from "@/lib/mappers";
+import { pickLastOutboundBodyForInbox } from "@/lib/inboxOutboundPreview";
 import { Lead, ReplyCategory, TimelineItem } from "@/types/lead";
 
 export type LeadWithCampaigns = DbLead & {
@@ -269,14 +270,7 @@ export function aggregateDashboard(
     const irs = byLeadInbound.get(l.id) ?? [];
     const latest = irs[0];
     if (!latest) continue;
-    const outs = messages.filter(
-      (m) =>
-        m.leadId === l.id &&
-        m.direction === "outbound" &&
-        m.kind !== "system_auto" &&
-        m.status !== "scheduled"
-    );
-    const lastOut = outs.sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime())[0];
+    const lastOutboundBody = pickLastOutboundBodyForInbox(messages, l.id, latest.receivedAt);
     threads.push({
       leadId: l.id,
       fullName: l.fullName,
@@ -287,7 +281,7 @@ export function aggregateDashboard(
       priorityTier: l.priorityTier,
       score: l.score,
       status: l.status,
-      lastOutboundBody: lastOut?.body?.trim() ? lastOut.body : "—",
+      lastOutboundBody,
       inboundBody: latest.bodyText?.trim() ? latest.bodyText : "—",
       classification: latest.classification,
       confidence: latest.classificationConfidence,

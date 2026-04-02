@@ -69,6 +69,13 @@ function bookingRecordSortRank(b: Lead["bookingHistory"][number]): number {
   return 0;
 }
 
+/** Omit invite-only rows once a `booked` row exists — avoids a fake “pending” chip on the invite-send day/time. */
+function bookingHistoryForCalendarDisplay(lead: Lead): Lead["bookingHistory"] {
+  const rows = lead.bookingHistory ?? [];
+  if (!rows.some((b) => b.status === "booked")) return rows;
+  return rows.filter((b) => b.status !== "booking_sent");
+}
+
 /** Prefer a confirmed Cal booking over an older “invite sent” row so the dashboard matches reality. */
 function latestBookingRecord(lead: Lead | null | undefined) {
   if (!lead?.bookingHistory?.length) return null;
@@ -124,7 +131,7 @@ function DashboardBookingsCalendar({ leads }: { leads: Lead[] }) {
       bucket: ReturnType<typeof classifyBookingInvite>;
     }[] = [];
     for (const lead of leads) {
-      for (const b of lead.bookingHistory) {
+      for (const b of bookingHistoryForCalendarDisplay(lead)) {
         const anchor = bookingCalendarAnchor(b);
         if (!anchor) continue;
         out.push({
@@ -763,6 +770,8 @@ export function DashboardApp({
 
   const [simulationLeadId, setSimulationLeadId] = useState<string | null>(() => initialLeads[0]?.id ?? null);
   const [simReplyDraft, setSimReplyDraft] = useState("");
+  const [gcalSyncBusy, setGcalSyncBusy] = useState(false);
+  const [gcalSyncMsg, setGcalSyncMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!vm.leads.length) return;
@@ -1017,7 +1026,7 @@ export function DashboardApp({
   const bookingInviteList = useMemo(() => {
     const rows: { lead: Lead; b: Lead["bookingHistory"][number]; bucket: ReturnType<typeof classifyBookingInvite> }[] = [];
     for (const lead of vm.leads) {
-      for (const b of lead.bookingHistory) {
+      for (const b of bookingHistoryForCalendarDisplay(lead)) {
         rows.push({ lead, b, bucket: classifyBookingInvite(lead, b) });
       }
     }
@@ -2153,14 +2162,50 @@ export function DashboardApp({
           {activeView === "bookings" && (
             <section className="space-y-4">
               <div className="card flex flex-wrap items-center justify-between gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <h2 className="text-lg font-semibold text-brand-ink">Bookings</h2>
                   <p className="text-xs text-slate-600">Pipeline state and calendar confirmations. Lead source stays visible for attribution.</p>
+                  {gcalSyncMsg ? (
+                    <p className="mt-2 text-xs text-slate-700" role="status">
+                      {gcalSyncMsg}
+                    </p>
+                  ) : null}
                 </div>
-                <p className="text-sm text-slate-700">
-                  Cal link:{" "}
-                  <span className="font-mono text-xs text-brand-ink">{vm.bookingLinkDisplay || appConfig.bookingLink}</span>
-                </p>
+                <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                  <button
+                    type="button"
+                    disabled={gcalSyncBusy}
+                    onClick={async () => {
+                      setGcalSyncMsg(null);
+                      setGcalSyncBusy(true);
+                      try {
+                        const r = await vm.syncGoogleCalendarBookings();
+                        if (r.ok) {
+                          const skipped = r.skipped?.length ? ` · skipped: ${r.skipped.length}` : "";
+                          setGcalSyncMsg(
+                            `Google Calendar: ${r.markedBooked ?? 0} marked booked, ${r.updatedExisting ?? 0} times filled, ${r.eventsScanned ?? 0} events scanned.${skipped}`
+                          );
+                        } else {
+                          setGcalSyncMsg(
+                            r.error ??
+                              (r.status === 401
+                                ? "Unauthorized — set NEXT_PUBLIC_ADMIN_API_KEY to match ADMIN_API_KEY for this dashboard."
+                                : `Sync failed (${r.status}).`)
+                          );
+                        }
+                      } finally {
+                        setGcalSyncBusy(false);
+                      }
+                    }}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-ink shadow-sm transition hover:border-brand/40 disabled:opacity-60"
+                  >
+                    {gcalSyncBusy ? "Syncing…" : "Sync from Google Calendar"}
+                  </button>
+                  <p className="text-sm text-slate-700">
+                    Cal link:{" "}
+                    <span className="font-mono text-xs text-brand-ink">{vm.bookingLinkDisplay || appConfig.bookingLink}</span>
+                  </p>
+                </div>
               </div>
               <div className="space-y-4">
                 <BookingsPageCalendar rows={bookingInviteList} onSelect={(row) => setBookingDetailPick(row)} />

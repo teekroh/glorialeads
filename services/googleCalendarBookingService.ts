@@ -58,7 +58,7 @@ function parseCredentialJson(): { client_email: string; private_key: string } | 
   }
 }
 
-async function getCalendarClient() {
+export async function getGoogleCalendarApiClient() {
   const creds = parseCredentialJson();
   if (!creds) throw new Error("Invalid GOOGLE_CALENDAR_CREDENTIALS_JSON");
 
@@ -121,7 +121,7 @@ export async function tryAutoBookSuggestedTime(params: {
 
   let calendar;
   try {
-    calendar = await getCalendarClient();
+    calendar = await getGoogleCalendarApiClient();
   } catch (e) {
     return { handled: false, reason: `calendar_auth_failed:${e instanceof Error ? e.message : String(e)}` };
   }

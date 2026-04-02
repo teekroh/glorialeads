@@ -512,6 +512,33 @@ export const useDashboard = (
     return { ok: true as const, id: data.id ?? "" };
   };
 
+  const syncGoogleCalendarBookings = async () => {
+    const res = await fetch("/api/bookings/sync-google", {
+      method: "POST",
+      headers: {
+        ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
+      }
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      eventsScanned?: number;
+      markedBooked?: number;
+      updatedExisting?: number;
+      skipped?: string[];
+    };
+    await refresh();
+    return {
+      ok: res.ok && data.ok !== false,
+      status: res.status,
+      error: data.error,
+      eventsScanned: data.eventsScanned,
+      markedBooked: data.markedBooked,
+      updatedExisting: data.updatedExisting,
+      skipped: data.skipped
+    };
+  };
+
   return {
     leads,
     inboxThreads,
@@ -553,6 +580,7 @@ export const useDashboard = (
     createLead,
     notifications,
     markNotificationsRead,
-    dispatchScheduledDue
+    dispatchScheduledDue,
+    syncGoogleCalendarBookings
   };
 };

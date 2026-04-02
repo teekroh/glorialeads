@@ -25,6 +25,23 @@ function emailFromCalResponses(responses: Json | undefined): string | null {
   return null;
 }
 
+/** Cal usually sends ISO strings; some integrations send epoch ms or seconds. */
+function coerceCalDateTime(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (!t) return undefined;
+    const d = new Date(t);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  if (typeof v === "number" && Number.isFinite(v)) {
+    const ms = v > 1e12 ? v : v * 1000;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  return undefined;
+}
+
 /**
  * Process Cal.com (or mock) booking webhook payload.
  * Resolves lead by explicit leadId, then attendee email.
@@ -86,27 +103,34 @@ export async function processCalBookingPayload(body: unknown): Promise<{
       (bookingFromPayload.bookingId as string)?.toString() ||
       externalBookingId;
     meetingStart =
-      (bookingFromPayload.startTime as string) ||
-      (bookingFromPayload.start as string) ||
-      (bookingFromPayload.startTimeUtc as string) ||
+      coerceCalDateTime(bookingFromPayload.startTime) ||
+      coerceCalDateTime(bookingFromPayload.start) ||
+      coerceCalDateTime(bookingFromPayload.startTimeUtc) ||
       meetingStart;
     meetingEnd =
-      (bookingFromPayload.endTime as string) ||
-      (bookingFromPayload.end as string) ||
-      (bookingFromPayload.endTimeUtc as string) ||
+      coerceCalDateTime(bookingFromPayload.endTime) ||
+      coerceCalDateTime(bookingFromPayload.end) ||
+      coerceCalDateTime(bookingFromPayload.endTimeUtc) ||
       meetingEnd;
 
     const responses = bookingFromPayload.responses as Json | undefined;
     const attendees = bookingFromPayload.attendees as unknown;
+    let organizerEmail: string | null = null;
+    const org = bookingFromPayload.organizer;
+    if (org && typeof org === "object") {
+      const oe = (org as Json).email;
+      if (typeof oe === "string" && oe.trim()) organizerEmail = normEmail(oe);
+    }
     if (Array.isArray(attendees)) {
       for (const row of attendees) {
         if (row && typeof row === "object") {
           const a = row as Json;
           const em = (a.email as string) || null;
-          if (em?.trim()) {
-            attendeeEmail = normEmail(em);
-            break;
-          }
+          if (!em?.trim()) continue;
+          const guest = normEmail(em);
+          if (organizerEmail && guest === organizerEmail) continue;
+          attendeeEmail = guest;
+          break;
         }
       }
     }
