@@ -17,7 +17,8 @@ Rules:
 - Output ONLY the email body: no subject line, no greeting labels like "Subject:", no markdown, no bullet markdown.
 - Warm, concise, professional US English.
 - Do not fabricate discounts, guarantees, or certifications.
-- When a scheduling URL is required, output the exact token ${BOOKING_TOKEN} on its own line or after "Book here:" — never invent a URL.`;
+- When a scheduling URL is required, output the exact token ${BOOKING_TOKEN} on its own line or after "Book here:" — never invent a URL.
+- When you include ${BOOKING_TOKEN}, add a brief sentence (your own wording) that the link is to lock in a specific time; the slot may default to a short video meet. If they prefer a phone call instead, they can reply with their number.`;
 
 export function expandClaudeBookingPlaceholders(text: string): string {
   const link = getBookingLink() || "[configure BOOKING_LINK]";
@@ -195,7 +196,7 @@ ${inboundText.slice(0, 4000)}
 ---
 ${baseHint}
 
-Write a helpful reply as ${appConfig.companyName}. Plain text. If inviting them to schedule, include ${BOOKING_TOKEN} exactly once where the Cal link should go. Under ~220 words.`;
+Write a helpful reply as ${appConfig.companyName}. Plain text. If inviting them to schedule, include ${BOOKING_TOKEN} exactly once where the Cal link should go; briefly explain the link locks in a time and that video (e.g. Meet) is typical — phone is fine if they leave their number. Under ~220 words.`;
   const out = await completeUserPrompt(user);
   return out ? expandBookingToken(out) : null;
 }
@@ -208,7 +209,7 @@ They wrote:
 ${inboundText.slice(0, 3000)}
 ---
 
-They are interested or asking to schedule. Write a short, warm email that shares the scheduling link using the token ${BOOKING_TOKEN} exactly once (we replace it with our Cal URL). Plain text, under ~150 words.`;
+They are interested or asking to schedule. Write a short, warm email that shares the scheduling link using the token ${BOOKING_TOKEN} exactly once (we replace it with our Cal URL). Mention in your own words that the link is to nail down a specific time; default is often a quick video meet — if they prefer a phone call, they can reply with their number. Plain text, under ~150 words.`;
   const out = await completeUserPrompt(user);
   return out ? expandBookingToken(out) : null;
 }

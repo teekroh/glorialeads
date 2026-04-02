@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { appConfig } from "@/config/appConfig";
 import { claudeModelId, isClaudeCopyConfigured } from "@/config/claudeConfig";
 import type { ReplyClassificationResult } from "@/services/replyClassifier";
+import { applyScheduleIntentConfidenceFloor } from "@/services/replyClassifier";
 import { ReplyCategory } from "@/types/lead";
 
 const VALID: ReplyCategory[] = [
@@ -21,7 +22,7 @@ const SYSTEM = `You classify inbound sales emails for ${appConfig.companyName}.
 Respond with a single JSON object only (no markdown). Keys:
 - "classification": one of: positive, asks_for_link, suggested_time, pricing_question, info_request, objection, not_now, unsubscribe, unclear
 - "confidence": number 0-1
-- "mixed_intent": boolean — true if two+ conflicting intents (e.g. pricing + unsubscribe)
+- "mixed_intent": boolean — true if two+ conflicting intents (e.g. pricing + time, or pricing + unsubscribe). NOT mixed: hedged positive ("might be interested") with a single clear scheduling request — treat as suggested_time or asks_for_link with mixed_intent false
 - "reason": short human-readable summary
 - "recommended_action": one line for operators
 - "explanation": optional brief note on signals you used
@@ -90,9 +91,16 @@ Return JSON only. Improve classification if the rules misread nuance; otherwise 
     const recommendedAction = String(p.recommended_action ?? ruleBased.recommendedAction).trim() || ruleBased.recommendedAction;
     const explanation = String(p.explanation ?? ruleBased.explanation).trim() || ruleBased.explanation;
 
+    const adjustedConfidence = applyScheduleIntentConfidenceFloor(
+      Math.min(1, Math.max(0, confidence)),
+      c,
+      inboundText,
+      mixedIntent
+    );
+
     return {
       classification: c,
-      confidence: Math.min(1, Math.max(0, confidence)),
+      confidence: adjustedConfidence,
       recommendedAction,
       reason: `[Claude] ${reason}`,
       explanation: `claude_classifier refine. ${explanation}`,

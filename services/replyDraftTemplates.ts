@@ -11,7 +11,7 @@ If you're open to it:
 export const draftSuggestedTimeReply = (_lead: Lead, _inboundSnippet: string) => {
   const link = getBookingLink() || "[configure BOOKING_LINK]";
   const name = _lead.firstName?.trim() || "there";
-  return `Hi ${name} — thanks for proposing a time. I’ll confirm or suggest a nearby slot shortly.\n\nYou can also book a 15-minute opening here: ${link}`;
+  return `Hi ${name} — thanks for proposing a time. I’ll confirm or suggest a nearby slot shortly.\n\nYou can use this link to lock in a specific slot (it may default to a short video meet); if you prefer a phone call, just reply with your number.\n\n${link}`;
 };
 
 export const draftPricingReply = () => {

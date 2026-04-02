@@ -36,12 +36,7 @@ export const getBookingLinkForDisplay = (): string => {
 
 export function getBookingReplyTemplate(): string {
   const link = getBookingLink() || getBookingLinkForDisplay() || "[configure BOOKING_LINK]";
-  return `Great — happy to connect.
-
-A quick 15-minute intro call is easiest:
-${link}
-
-Looking forward to it.`;
+  return formatPositiveBookingBody(link);
 }
 
 let warnedMissing = false;
@@ -57,7 +52,8 @@ export function warnBookingLinkMissing(context: string): void {
 
 const POSITIVE_BOOKING_TEMPLATE = `Great — happy to connect.
 
-A quick 15-minute intro call is easiest:
+This link is just to lock in a specific time for a quick 15-minute intro (it may default to a short video meet). If you’d rather do a phone call, reply with your number and we’ll call you.
+
 {{BOOKING_LINK}}
 
 Looking forward to it.`;

@@ -3,6 +3,7 @@ import { appConfig } from "@/config/appConfig";
 import { claudeModelId, isClaudeCopyConfigured } from "@/config/claudeConfig";
 import { resolveClaudeSystemPrompt } from "@/services/claudeSystemPrompt";
 import { formatFullLeadContextForClaude } from "@/services/leadContextFormatting";
+import { applyScheduleIntentConfidenceFloor } from "@/services/replyClassifier";
 import type { Lead, ReplyCategory } from "@/types/lead";
 
 const SYSTEM_GATE = `You are a conservative reviewer for ${appConfig.companyName} outbound email automation.
@@ -12,7 +13,9 @@ You MUST respond with a single JSON object only (no markdown fences, no prose be
 - "rationale": short string explaining the confidence level.
 - "reply_body": plain-text email body to send (US English, warm, professional, no markdown). If a Cal scheduling link is needed, use the literal token {{BOOKING_LINK}} once — never invent a URL.
 
-Be extremely strict: prefer routing to human review (low confidence) over risking a mistaken or tone-deaf send.`;
+Be extremely strict: prefer routing to human review (low confidence) over risking a mistaken or tone-deaf send.
+
+When reply_body includes {{BOOKING_LINK}}: in your own words, say the link is to lock in a specific time; the meeting may default to a short video call (e.g. Google Meet). If they would rather do a phone call, they can reply with their number and you will call them. One short sentence is enough.`;
 
 function stripJsonFence(raw: string): string {
   let s = raw.trim();
@@ -79,7 +82,13 @@ Return JSON only with confidence, rationale, reply_body.`;
     const rationale = String(parsed.rationale ?? "").trim();
     const replyBody = String(parsed.reply_body ?? "").trim();
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1 || !replyBody) return null;
-    return { confidence, rationale, replyBody };
+    const adjustedConfidence = applyScheduleIntentConfidenceFloor(
+      confidence,
+      input.classification,
+      input.inboundText,
+      input.mixedIntent
+    );
+    return { confidence: adjustedConfidence, rationale, replyBody };
   } catch (e) {
     console.warn("[Gloria] Claude auto-send evaluation failed:", e);
     return null;

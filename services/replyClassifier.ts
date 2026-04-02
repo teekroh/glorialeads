@@ -1,3 +1,4 @@
+import { replyAutomationConfig } from "@/config/replyAutomationConfig";
 import { ReplyCategory } from "@/types/lead";
 
 export interface ReplyClassificationResult {
@@ -27,6 +28,31 @@ const LINK_EXPLICIT_RE =
 
 const POSITIVE_RE =
   /\b(interested|sounds good|that works|yes\b|yeah|yep|let['’]?s connect|best way to connect|great to hear|happy to (talk|connect)|looking forward|we're interested|we are interested)\b/i;
+
+/** Broader “wants to meet / get time” phrasing beyond day-of-week TIME_RE / LINK_EXPLICIT_RE. */
+const SCHEDULE_FOCUS_RE =
+  /\b(schedule|scheduling|book)\s+(a\s+)?(time|call|meeting|slot|intro)\b|\b(find|pick|grab|set up)\s+(a\s+)?(time|call|meeting|slot)\b|\bavailable\s+times?\b|\bwhat\s+times?\s+(work|are good)\b|\bwhen\s+(can|could)\s+we\s+(talk|meet|chat|connect|schedule)\b|\btime\s+to\s+(meet|talk|connect)\b/i;
+
+function shouldBoostScheduleConfidence(classification: ReplyCategory, rawText: string): boolean {
+  if (classification === "suggested_time" || classification === "asks_for_link") return true;
+  const lower = rawText.trim().toLowerCase();
+  if (classification === "positive") {
+    return detectSuggestedTime(lower) || detectAsksForLink(lower) || SCHEDULE_FOCUS_RE.test(lower);
+  }
+  return false;
+}
+
+/** Raise confidence for clear scheduling intents so automation gates (e.g. auto-send) match product intent. */
+export function applyScheduleIntentConfidenceFloor(
+  confidence: number,
+  classification: ReplyCategory,
+  inboundText: string,
+  mixedIntent = false
+): number {
+  if (mixedIntent) return confidence;
+  if (!shouldBoostScheduleConfidence(classification, inboundText)) return confidence;
+  return Math.max(confidence, replyAutomationConfig.scheduleIntentConfidenceFloor);
+}
 
 function detectPricing(t: string): boolean {
   return PRICING_RE.test(t) || /\bkitchen\b.{0,80}\brun\b/i.test(t);
@@ -94,7 +120,20 @@ export const classifyReply = (text: string): ReplyClassificationResult => {
   const positiveHit = detectPositive(lower);
 
   const qualificationSignals = [pricingHit, infoSignal, timeHit, linkHit].filter(Boolean).length;
-  const mixedIntent = qualificationSignals >= 2 || (positiveHit && qualificationSignals >= 1);
+  /**
+   * Mixed intent = multiple qualification tracks, or positive layered with pricing/info.
+   * Gold path: soft positive ("might be interested") + a single clear schedule ask (time OR link only)
+   * is *not* mixed — that is exactly the reply we want to auto-book.
+   */
+  const scheduleOnlyWithSoftPositive =
+    positiveHit &&
+    !pricingHit &&
+    !infoSignal &&
+    qualificationSignals === 1 &&
+    (timeHit || linkHit);
+  const mixedIntent = scheduleOnlyWithSoftPositive
+    ? false
+    : qualificationSignals >= 2 || (positiveHit && qualificationSignals >= 1);
 
   let classification: ReplyCategory = "unclear";
   if (pricingHit) classification = "pricing_question";
@@ -128,6 +167,8 @@ export const classifyReply = (text: string): ReplyClassificationResult => {
   else if (classification === "positive") confidence = positiveHit && !mixedIntent ? 0.91 : 0.76;
 
   if (mixedIntent) confidence = Math.min(confidence, 0.82);
+
+  confidence = applyScheduleIntentConfidenceFloor(confidence, classification, t, mixedIntent);
 
   const recommendedBy: Record<ReplyCategory, string> = {
     pricing_question: "Needs Review with call-first pricing draft (no auto-send unless explicitly enabled).",
