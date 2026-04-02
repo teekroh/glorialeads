@@ -66,6 +66,8 @@ export function VerifyWorkbench({
   const [searchPayload, setSearchPayload] = useState<SearchResponse | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [discoverBusy, setDiscoverBusy] = useState(false);
+  const [optionalVerifyEmail, setOptionalVerifyEmail] = useState("");
+  const [optionalVerifyAddress, setOptionalVerifyAddress] = useState("");
 
   const loadQueue = useCallback(async () => {
     setLoading(true);
@@ -103,9 +105,14 @@ export function VerifyWorkbench({
     return () => ac.abort();
   }, [current?.id]);
 
+  useEffect(() => {
+    setOptionalVerifyEmail("");
+    setOptionalVerifyAddress("");
+  }, [current?.id]);
+
   const openGoogle = useMemo(() => {
     if (!current) return "#";
-    return `https://www.google.com/search?q=${encodeURIComponent(buildReviewQuery(current))}`;
+    return `https://www.google.com/search?q=${encodeURIComponent(buildReviewQuery(current))}&udm=50`;
   }, [current]);
 
   const applyUnknownPenalty = async () => {
@@ -140,17 +147,35 @@ export function VerifyWorkbench({
     setSlide("out");
     await new Promise((r) => setTimeout(r, 180));
     try {
+      const email = optionalVerifyEmail.trim();
+      const address = optionalVerifyAddress.trim();
+      const payload: { verdict: typeof verdict; email?: string; address?: string } = { verdict };
+      if (email) payload.email = email;
+      if (address) payload.address = address;
+
       const res = await fetch(`/api/leads/${current.id}/verify-decision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verdict })
+        body: JSON.stringify(payload)
       });
+      if (res.status === 409) {
+        window.alert("That email is already used by another lead.");
+        setSlide("in");
+        return;
+      }
+      if (res.status === 400) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        window.alert(err.error === "invalid_email" ? "Enter a valid email or clear the field." : "Could not save decision.");
+        setSlide("in");
+        return;
+      }
       if (!res.ok) {
         window.alert("Could not save decision.");
         setSlide("in");
-        setBusy(false);
         return;
       }
+      setOptionalVerifyEmail("");
+      setOptionalVerifyAddress("");
       setQueue((prev) => prev.slice(1));
       setSlide("in");
       await onRefresh();
@@ -344,7 +369,7 @@ export function VerifyWorkbench({
                 rel="noopener noreferrer"
                 className="mt-3 inline-flex w-fit items-center rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-ink hover:bg-brand-dark"
               >
-                Open in Google →
+                Open in Google (AI mode) →
               </a>
               <div className="mt-4 min-h-[200px] flex-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 text-xs">
                 {searchLoading ? (
@@ -414,6 +439,38 @@ export function VerifyWorkbench({
               Reject (bad lead bin)
             </button>
           </div>
+
+          <div className="mx-auto mt-2 w-full max-w-lg space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-center text-[11px] font-medium uppercase tracking-wide text-slate-500">
+              Optional corrections (Ready / Reject only)
+            </p>
+            <label className="block text-xs text-slate-600">
+              <span className="font-medium text-brand-ink">Update email</span>
+              <input
+                type="email"
+                autoComplete="off"
+                value={optionalVerifyEmail}
+                onChange={(e) => setOptionalVerifyEmail(e.target.value)}
+                placeholder="Leave blank to keep current"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-brand-ink placeholder:text-slate-400"
+              />
+            </label>
+            <label className="block text-xs text-slate-600">
+              <span className="font-medium text-brand-ink">Update address</span>
+              <input
+                type="text"
+                autoComplete="off"
+                value={optionalVerifyAddress}
+                onChange={(e) => setOptionalVerifyAddress(e.target.value)}
+                placeholder='e.g. 123 Oak Ave, Philadelphia, PA 19103'
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-brand-ink placeholder:text-slate-400"
+              />
+              <span className="mt-1 block text-[11px] text-slate-500">
+                Parsed as text before the last “, ST 12345”. If it does not match, we only append a note to confidence fields.
+              </span>
+            </label>
+          </div>
+
           <p className="text-center text-xs text-slate-500">
             {queue.length > 1 ? (
               <>

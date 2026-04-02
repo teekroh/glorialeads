@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const q = (searchParams.get("q") ?? "").trim();
   if (!q) return NextResponse.json({ ok: false, error: "missing q" }, { status: 400 });
 
-  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}&udm=50`;
   const key = process.env.GOOGLE_CSE_API_KEY?.trim();
   const cx = process.env.GOOGLE_CSE_CX?.trim();
 
