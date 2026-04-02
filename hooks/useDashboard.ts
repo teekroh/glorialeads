@@ -436,6 +436,31 @@ export const useDashboard = (
     return { ok: res.ok && data.ok !== false, ...data };
   };
 
+  const placesDiscoverLeads = async (payload: Record<string, unknown> = {}) => {
+    const res = await fetch("/api/dev/places-discover", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
+      },
+      body: JSON.stringify({ limit: 5, ...payload })
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      created?: number;
+      skipped?: number;
+      skippedReasons?: string[];
+      queryUsed?: string;
+      pricingNote?: string;
+    };
+    await refresh();
+    if (!res.ok) {
+      return { ok: false as const, error: data.error ?? `HTTP ${res.status}`, ...data };
+    }
+    return { ok: true as const, ...data };
+  };
+
   const dispatchScheduledDue = async (limit = 20) => {
     const res = await fetch("/api/dev/dispatch-scheduled", {
       method: "POST",
@@ -524,6 +549,7 @@ export const useDashboard = (
     simulateInbound,
     seedInboxSamples,
     cleanSlateOutreach,
+    placesDiscoverLeads,
     createLead,
     notifications,
     markNotificationsRead,

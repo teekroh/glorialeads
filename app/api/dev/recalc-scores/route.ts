@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { recalculateAllLeadScores } from "@/services/persistenceService";
 import { blockInProductionUnlessEnabled, requireAdminApiKey } from "@/lib/apiRouteSecurity";
 
-/** POST to re-apply `scoreLeadBase` to every row (distance / spend / lead type only). Local dev helper. */
+/** POST to re-apply `scoreLeadBase` to every row (email, source, enrich status, distance, spend, lead type). Local dev helper. */
 export async function POST(request: Request) {
   const blocked = blockInProductionUnlessEnabled("ALLOW_DEV_ROUTES");
   if (blocked) return blocked;

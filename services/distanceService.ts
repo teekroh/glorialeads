@@ -1,6 +1,9 @@
 import zipcodes from "zipcodes";
 
-const HATFIELD = { lat: 40.2793, lon: -75.2994 };
+/** Showroom / origin for drive-time estimates (matches default Places discovery bias). */
+export const HATFIELD_ORIGIN = { lat: 40.2793, lon: -75.2994 };
+
+const HATFIELD = HATFIELD_ORIGIN;
 
 const haversineMinutes = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -24,3 +27,7 @@ export const estimateDistanceMinutes = (zip: string, state: string) => {
   if (state === "NJ" || state === "DE") return 50;
   return 90;
 };
+
+/** Drive-time minutes from lead coordinates to Hatfield origin. */
+export const estimateDistanceMinutesFromLatLng = (lat: number, lon: number) =>
+  haversineMinutes(HATFIELD.lat, HATFIELD.lon, lat, lon);

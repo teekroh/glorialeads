@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { mapDbLeadToLead } from "@/lib/mappers";
 import { DEPLOY_VERIFY_MIN_SCORE } from "@/services/deployVerifyPolicy";
-import { compareLeadsByPipelinePriority } from "@/services/scoringService";
+import { compareVerifyQueue } from "@/services/scoringService";
 
 /** Max leads returned in one response (browser memory). `stats.pending` is always the full count. */
 const VERIFY_QUEUE_MAX = 2000;
 
-/** Leads awaiting Verify (any score). Sorted by score desc. */
+/** Leads awaiting Verify (any score). Newest first, then score / lead type. */
 export async function GET() {
   const [pending, rejected, approved] = await Promise.all([
     db.lead.count({
@@ -27,12 +27,12 @@ export async function GET() {
       deployVerifyVerdict: null,
       doNotContact: false
     },
-    orderBy: [{ score: "desc" }, { fullName: "asc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { score: "desc" }, { fullName: "asc" }, { id: "asc" }],
     take: VERIFY_QUEUE_MAX
   });
 
   const leads = rows.map(mapDbLeadToLead);
-  leads.sort(compareLeadsByPipelinePriority);
+  leads.sort(compareVerifyQueue);
   return NextResponse.json({
     leads,
     stats: {

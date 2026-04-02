@@ -1535,7 +1535,9 @@ export function DashboardApp({
                     <thead className="sticky top-0 bg-slate-50">
                       <tr className="text-left text-xs text-slate-500">
                         <th className="p-2"><input type="checkbox" onChange={(e) => vm.setSelectedIds(e.target.checked ? vm.filtered.map((l) => l.id) : [])} /></th>
-                        <th className="p-2">Lead</th><th className="p-2">Source</th><th className="p-2">Status</th>
+                        <th className="p-2">Lead</th>
+                        <th className="p-2 whitespace-nowrap">Date added</th>
+                        <th className="p-2">Source</th><th className="p-2">Status</th>
                         <th className="p-2" title={ADDRESS_CONFIDENCE_TOOLTIP}>
                           Addr %
                         </th>
@@ -1560,6 +1562,12 @@ export function DashboardApp({
                               <span>{lead.fullName}</span>
                             </p>
                             <p className="text-xs text-slate-500">{lead.company || lead.email}</p>
+                          </td>
+                          <td className="p-2 whitespace-nowrap text-xs text-slate-600">
+                            {new Date(lead.createdAt).toLocaleString(undefined, {
+                              dateStyle: "medium",
+                              timeStyle: "short"
+                            })}
                           </td>
                           <td className="p-2">
                             <div className="flex flex-col gap-1">
@@ -2108,7 +2116,12 @@ export function DashboardApp({
               </div>
             </section>
           )}
-          {activeView === "verify" && <VerifyWorkbench onRefresh={() => void vm.refresh()} />}
+          {activeView === "verify" && (
+            <VerifyWorkbench
+              onRefresh={() => void vm.refresh()}
+              onDiscoverPlaces={() => vm.placesDiscoverLeads({ limit: 5 })}
+            />
+          )}
           {activeView === "simulation" && (
             <section className="space-y-4">
               <div className="card">

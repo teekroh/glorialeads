@@ -29,6 +29,12 @@ model Lead {
   /** Short explanation from confidence pass. */
   confidenceNotes      String    @default("")
   importedFromCsv      Boolean   @default(false)
+  /** Google Place `id` from Places API (New) Text Search — dedupe imports. */
+  googlePlaceId        String?   @unique
+  /** Business website from Places (optional). */
+  websiteUri           String?
+  /** Lowercase hostname without www — dedupe imports. */
+  websiteHost          String?
   amountSpent          Float     @default(0)
   notes                String
   distanceMinutes      Int       @default(0)

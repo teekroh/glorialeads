@@ -35,6 +35,9 @@ const OWNER_LEAD_ID = "lead-owner-tim-kroh";
 export const ensureOwnerTestLead = async () => {
   const now = new Date();
   const scored = scoreLeadBase({
+    email: "timothyjkroh@gmail.com",
+    source: "Manual",
+    enrichmentStatus: "none",
     distanceMinutes: 10,
     amountSpent: 30000,
     leadType: "homeowner"
@@ -120,6 +123,9 @@ export const createManualLead = async (
     Number.isFinite(input.distanceMinutes) ? Math.max(0, Math.round(Number(input.distanceMinutes))) : 30;
 
   const scored = scoreLeadBase({
+    email,
+    source: "Manual",
+    enrichmentStatus: "none",
     distanceMinutes,
     amountSpent,
     leadType: input.leadType
@@ -541,7 +547,11 @@ export const enrichLead = async (leadId: string) => {
     ? Math.min(100, Math.max(lead.addressConfidence ?? 0, 71))
     : lead.addressConfidence;
 
+  const nextEnrichment = geo.ok ? "enriched" : lead.enrichmentStatus;
   const scored = scoreLeadBase({
+    email: lead.email,
+    source: lead.source as Lead["source"],
+    enrichmentStatus: nextEnrichment === "enriched" ? "enriched" : "none",
     distanceMinutes: lead.distanceMinutes,
     amountSpent: lead.amountSpent,
     leadType: lead.leadType as Lead["leadType"]
@@ -579,6 +589,9 @@ export const recalculateAllLeadScores = async (): Promise<number> => {
   const rows = await db.lead.findMany({
     select: {
       id: true,
+      email: true,
+      source: true,
+      enrichmentStatus: true,
       distanceMinutes: true,
       amountSpent: true,
       leadType: true,
@@ -588,6 +601,9 @@ export const recalculateAllLeadScores = async (): Promise<number> => {
   const now = new Date();
   for (const row of rows) {
     const scored = scoreLeadBase({
+      email: row.email,
+      source: row.source as Lead["source"],
+      enrichmentStatus: row.enrichmentStatus === "enriched" ? "enriched" : "none",
       distanceMinutes: row.distanceMinutes,
       amountSpent: row.amountSpent,
       leadType: row.leadType as Lead["leadType"]

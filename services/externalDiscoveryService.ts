@@ -19,7 +19,14 @@ export const mockDiscoveredLeads = (): Lead[] => {
     { fullName: "Avery Monroe", city: "Yardley", state: "PA", zip: "19067", email: "avery@monroedesignhouse.com", phone: "215-555-2944", leadType: "designer" as const, amountSpent: 43000, distanceMinutes: 44 }
   ];
   return seeds.map((seed) => {
-    const scored = scoreLeadBase(seed);
+    const scored = scoreLeadBase({
+      email: seed.email,
+      source: "Scraped / External",
+      enrichmentStatus: "none",
+      distanceMinutes: seed.distanceMinutes,
+      amountSpent: seed.amountSpent,
+      leadType: seed.leadType
+    });
     const [firstName, ...rest] = seed.fullName.split(" ");
     return {
       id: uid(),

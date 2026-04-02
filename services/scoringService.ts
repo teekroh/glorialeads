@@ -1,57 +1,121 @@
 import { appConfig } from "@/config/appConfig";
-import { Lead, LeadType, PriorityTier, ProjectTier } from "@/types/lead";
+import { Lead, LeadSource, LeadType, PriorityTier, ProjectTier } from "@/types/lead";
 
+/**
+ * Pipeline score (0–100): email → lead type → drive-time distance → source → spend.
+ * Does **not** use CSV address-confidence %; that field is for outreach/copy QA only.
+ * Distance is estimated minutes (e.g. from ZIP), not “how good the street address looks,”
+ * so pros who used a home address are not over-penalized on fit score for that reason.
+ */
 export interface ScoreBreakdown {
-  locationScore: number;
-  financialCapacityScore: number;
+  emailPresentScore: number;
   leadTypeScore: number;
-  intentSignalScore: number;
-  projectFitScore: number;
-  relationshipScore: number;
-  conversionProbabilityScore: number;
-  largeProjectPenalty: number;
+  distanceScore: number;
+  sourceScore: number;
+  spendScore: number;
 }
 
-/** Trade types (designer / builder / etc.) are weighted far above homeowner so pipeline sorts surface pros first. */
-const leadTypeWeights: Record<LeadType, number> = {
-  homeowner: 6,
-  designer: 26,
+const LEAD_TYPE_ORDER: LeadType[] = [
+  "designer",
+  "builder",
+  "architect",
+  "commercial builder",
+  "cabinet shop",
+  "homeowner"
+];
+
+const LEAD_TYPE_POINTS: Record<LeadType, number> = {
+  designer: 30,
   builder: 26,
-  architect: 25,
-  "cabinet shop": 20,
-  "commercial builder": 24
+  architect: 22,
+  "commercial builder": 19,
+  "cabinet shop": 15,
+  homeowner: 5
 };
 
-/** When scores tie, higher rank sorts first (trade before homeowner). */
-function tradePipelineRank(leadType: LeadType): number {
-  switch (leadType) {
-    case "designer":
-    case "architect":
-    case "builder":
-    case "commercial builder":
-      return 4;
-    case "cabinet shop":
+const SOURCE_POINTS: Record<LeadSource, number> = {
+  "Scraped / External": 15,
+  "Online Enriched": 11,
+  Manual: 7,
+  "CSV Import": 3
+};
+
+/** CSV rows that completed online enrich behave like Online Enriched for scoring (not the raw sheet %). */
+export function resolvedSourceForScore(
+  source: LeadSource,
+  enrichmentStatus: Lead["enrichmentStatus"] | undefined
+): LeadSource {
+  if (source === "Scraped / External") return "Scraped / External";
+  if (source === "Online Enriched") return "Online Enriched";
+  if (source === "CSV Import" && enrichmentStatus === "enriched") return "Online Enriched";
+  return source;
+}
+
+function hasActionableEmail(email: string): boolean {
+  const t = email.trim().toLowerCase();
+  if (t.length < 5) return false;
+  if (!t.includes("@")) return false;
+  const [local, domain] = t.split("@");
+  if (!local || !domain || !domain.includes(".")) return false;
+  return true;
+}
+
+function distancePoints(distanceMinutes: number): number {
+  const max = appConfig.maxDistanceMinutes;
+  const d = Number.isFinite(distanceMinutes) ? Math.max(0, distanceMinutes) : max;
+  if (d >= max) return 0;
+  return Math.round(20 * (1 - d / max));
+}
+
+function spendPoints(amountSpent: number): number {
+  const tier = estimateProjectTier(amountSpent);
+  switch (tier) {
+    case "$20k-$40k":
+      return 10;
+    case "Sub-$20k":
+      return 7;
+    case "$40k-$100k":
+      return 8;
+    case "$100k-$300k":
+      return 5;
+    case "$300k+":
       return 3;
-    case "homeowner":
-      return 0;
     default:
-      return 0;
+      return 4;
   }
 }
 
-/** Sort key for lead tables and Verify: best score first, then trade over homeowner, then name. */
+/** Higher = earlier in pipeline when scores tie (designer > builder > … > homeowner). */
+export function leadTypePriorityRank(leadType: LeadType): number {
+  const i = LEAD_TYPE_ORDER.indexOf(leadType);
+  if (i === -1) return -1;
+  return LEAD_TYPE_ORDER.length - 1 - i;
+}
+
+/** Sort: score desc, then lead-type priority, then name. */
 export function compareLeadsByPipelinePriority(
   a: Pick<Lead, "id" | "score" | "fullName" | "leadType">,
   b: Pick<Lead, "id" | "score" | "fullName" | "leadType">
 ): number {
   if (b.score !== a.score) return b.score - a.score;
-  const ra = tradePipelineRank(a.leadType);
-  const rb = tradePipelineRank(b.leadType);
+  const ra = leadTypePriorityRank(a.leadType);
+  const rb = leadTypePriorityRank(b.leadType);
   if (rb !== ra) return rb - ra;
   const na = (a.fullName || "").toLowerCase();
   const nb = (b.fullName || "").toLowerCase();
   if (na !== nb) return na.localeCompare(nb);
   return a.id.localeCompare(b.id);
+}
+
+/** Verify queue: newest leads first (e.g. daily Places batch), then score / type / name. */
+export function compareVerifyQueue(
+  a: Pick<Lead, "id" | "score" | "fullName" | "leadType" | "createdAt">,
+  b: Pick<Lead, "id" | "score" | "fullName" | "leadType" | "createdAt">
+): number {
+  const ta = new Date(a.createdAt).getTime();
+  const tb = new Date(b.createdAt).getTime();
+  if (tb !== ta) return tb - ta;
+  return compareLeadsByPipelinePriority(a, b);
 }
 
 export function estimateProjectTier(amountSpent: number): ProjectTier {
@@ -62,64 +126,41 @@ export function estimateProjectTier(amountSpent: number): ProjectTier {
   return "$300k+";
 }
 
-/** Business / fit score only (distance, spend tier, lead type). Addr % is manual pre-deploy QA, not scored here. */
-export function scoreLeadBase(lead: Pick<Lead, "distanceMinutes" | "amountSpent" | "leadType">) {
-  if (lead.distanceMinutes > appConfig.maxDistanceMinutes) {
-    return {
-      score: 0,
-      conversionScore: 0,
-      projectFitScore: 0,
-      priorityTier: "Tier D" as PriorityTier,
-      estimatedProjectTier: estimateProjectTier(lead.amountSpent),
-      breakdown: {
-        locationScore: 0,
-        financialCapacityScore: 0,
-        leadTypeScore: 0,
-        intentSignalScore: 0,
-        projectFitScore: 0,
-        relationshipScore: 0,
-        conversionProbabilityScore: 0,
-        largeProjectPenalty: 0
-      }
-    };
-  }
+export type ScoreLeadBaseInput = Pick<Lead, "email" | "distanceMinutes" | "amountSpent" | "leadType"> & {
+  source: LeadSource;
+  enrichmentStatus?: Lead["enrichmentStatus"];
+};
 
-  const tier = estimateProjectTier(lead.amountSpent);
-  const locationScore = lead.distanceMinutes <= appConfig.maxDistanceMinutes ? 20 : 0;
-  const financialCapacityScore = tier === "$20k-$40k" ? 24 : tier === "Sub-$20k" ? 14 : tier === "$40k-$100k" ? 12 : 6;
-  const leadTypeScore = leadTypeWeights[lead.leadType];
-  const intentSignalScore = lead.distanceMinutes <= 35 ? 10 : 6;
-  const projectFitScore = tier === "$20k-$40k" ? 20 : tier === "Sub-$20k" ? 12 : 8;
-  const relationshipScore =
-    lead.leadType === "homeowner" ? 3 : lead.leadType === "cabinet shop" ? 9 : 10;
-  const conversionProbabilityScore = Math.min(18, Math.max(5, 30 - lead.distanceMinutes / 3));
-  const largeProjectPenalty = tier === "$300k+" ? 35 : 0;
+export function scoreLeadBase(input: ScoreLeadBaseInput) {
+  const tier = estimateProjectTier(input.amountSpent);
+  const emailPresentScore = hasActionableEmail(input.email) ? 25 : 0;
+  const leadTypeScore = LEAD_TYPE_POINTS[input.leadType] ?? LEAD_TYPE_POINTS.homeowner;
+  const distanceScore = distancePoints(input.distanceMinutes);
+  const src = resolvedSourceForScore(input.source, input.enrichmentStatus);
+  const sourceScore = SOURCE_POINTS[src] ?? SOURCE_POINTS["CSV Import"];
+  const spendScore = spendPoints(input.amountSpent);
 
   const breakdown: ScoreBreakdown = {
-    locationScore,
-    financialCapacityScore,
+    emailPresentScore,
     leadTypeScore,
-    intentSignalScore,
-    projectFitScore,
-    relationshipScore,
-    conversionProbabilityScore,
-    largeProjectPenalty
+    distanceScore,
+    sourceScore,
+    spendScore
   };
+
   const score = Math.max(
     0,
-    Math.round(
-      locationScore +
-        financialCapacityScore +
-        leadTypeScore +
-        intentSignalScore +
-        projectFitScore +
-        relationshipScore +
-        conversionProbabilityScore -
-        largeProjectPenalty
-    )
+    Math.min(100, Math.round(emailPresentScore + leadTypeScore + distanceScore + sourceScore + spendScore))
   );
-  const conversionScore = Math.round((conversionProbabilityScore + relationshipScore + intentSignalScore) * 2.2);
-  const priorityTier: PriorityTier = score >= 75 ? "Tier A" : score >= 55 ? "Tier B" : score >= 38 ? "Tier C" : "Tier D";
+
+  const projectFitScore = Math.min(100, Math.round(leadTypeScore + spendScore * 1.2));
+  const conversionScore = Math.min(
+    100,
+    Math.round(emailPresentScore * 1.2 + sourceScore + distanceScore * 0.85 + spendScore * 0.5)
+  );
+
+  const priorityTier: PriorityTier = score >= 78 ? "Tier A" : score >= 60 ? "Tier B" : score >= 42 ? "Tier C" : "Tier D";
+
   return { score, conversionScore, projectFitScore, priorityTier, estimatedProjectTier: tier, breakdown };
 }
 

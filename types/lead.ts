@@ -91,6 +91,10 @@ export interface Lead {
   /** Explanation from confidence pass (CSV). */
   confidenceNotes?: string;
   importedFromCsv: boolean;
+  /** Google Place id when sourced from Places API discovery. */
+  googlePlaceId?: string | null;
+  websiteUri?: string | null;
+  websiteHost?: string | null;
   /** Optional CRM / routing tags for message generation. */
   tags?: string[];
   outreachHistory: Array<{ at: string; message: string; campaignId: string }>;
@@ -109,14 +113,11 @@ export interface Lead {
   timeline?: TimelineItem[];
   latestInbound?: LatestInboundMeta;
   scoreBreakdown?: {
-    locationScore: number;
-    financialCapacityScore: number;
+    emailPresentScore: number;
     leadTypeScore: number;
-    intentSignalScore: number;
-    projectFitScore: number;
-    relationshipScore: number;
-    conversionProbabilityScore: number;
-    largeProjectPenalty: number;
+    distanceScore: number;
+    sourceScore: number;
+    spendScore: number;
   };
 }
 

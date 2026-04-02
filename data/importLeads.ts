@@ -155,7 +155,14 @@ export const importCsvLeads = (): { leads: Lead[]; summary: ImportSummary } => {
       "confidence notes"
     ]);
 
-    const scored = scoreLeadBase({ distanceMinutes, amountSpent, leadType });
+    const scored = scoreLeadBase({
+      email,
+      source: "CSV Import",
+      enrichmentStatus: "none",
+      distanceMinutes,
+      amountSpent,
+      leadType
+    });
 
     leads.push({
       id: uid(),

@@ -6,20 +6,11 @@ export type SendResult = {
   status: "sent" | "dry_run" | "failed";
   providerId?: string;
   error?: string;
-  /** Exact text sent or that would have been sent (signature + optional safe-test footer). */
+  /** Exact text sent or that would have been sent (optional safe-test footer only). */
   finalText: string;
 };
 
 const resend = outreachConfig.resendApiKey ? new Resend(outreachConfig.resendApiKey) : null;
-
-/** Appends configured plain-text signature. Exported for previews and test routes. */
-export function withOutreachSignature(text: string): string {
-  const sig = outreachConfig.emailSignature.trim();
-  const body = text.trim();
-  if (!sig) return body;
-  if (!body) return sig;
-  return `${body}\n\n${sig}`;
-}
 
 function withTestRecipientFooter(
   text: string,
@@ -46,9 +37,9 @@ export function buildOutboundEmailText(payload: {
 }): string {
   const testTo = outreachConfig.testToEmail;
   const actualTo = testTo && testTo.length > 0 ? testTo : payload.to;
-  const signed = withOutreachSignature(payload.text);
+  const body = payload.text.trim();
   const intended = payload.intendedTo?.trim() || payload.to;
-  return withTestRecipientFooter(signed, intended, actualTo);
+  return withTestRecipientFooter(body, intended, actualTo);
 }
 
 export const sendOutreachEmail = async (payload: {

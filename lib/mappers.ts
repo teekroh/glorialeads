@@ -35,6 +35,9 @@ export const mapDbLeadToLead = (lead: DbLead): Lead => ({
   addressConfidence: lead.addressConfidence ?? null,
   confidenceNotes: lead.confidenceNotes ?? "",
   importedFromCsv: lead.importedFromCsv,
+  googlePlaceId: lead.googlePlaceId ?? null,
+  websiteUri: lead.websiteUri ?? null,
+  websiteHost: lead.websiteHost ?? null,
   outreachHistory: [],
   replyHistory: [],
   bookingHistory: []

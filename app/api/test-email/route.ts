@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
-import { withOutreachSignature } from "@/services/outreachSendService";
 import { blockInProductionUnlessEnabled, requireAdminApiKey } from "@/lib/apiRouteSecurity";
 import { getEffectiveOutreachDryRun } from "@/services/outreachDryRunService";
 
@@ -56,7 +55,7 @@ export async function GET(request: Request) {
       to: TEST_TO,
       replyTo: replyToEmail,
       subject: SUBJECT,
-      text: withOutreachSignature(BODY)
+      text: BODY.trim()
     });
 
     console.log("[test-email] Resend result:", JSON.stringify(result, null, 2));

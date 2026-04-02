@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Lead } from "@/types/lead";
-import { compareLeadsByPipelinePriority } from "@/services/scoringService";
+import { compareVerifyQueue } from "@/services/scoringService";
 import {
   ADDRESS_CONFIDENCE_TOOLTIP,
   AddressConfidenceBadge
@@ -47,7 +47,17 @@ function buildReviewQuery(lead: Lead): string {
   return parts.join(" ");
 }
 
-export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> | void }) {
+export function VerifyWorkbench({
+  onRefresh,
+  onDiscoverPlaces
+}: {
+  onRefresh: () => Promise<void> | void;
+  /** Optional: run POST /api/dev/places-discover (admin key + GOOGLE_PLACES_API_KEY). */
+  onDiscoverPlaces?: () => Promise<
+    | { ok: true; created?: number; skipped?: number; pricingNote?: string; queryUsed?: string }
+    | { ok: false; error?: string }
+  >;
+}) {
   const [queue, setQueue] = useState<Lead[]>([]);
   const [stats, setStats] = useState<QueueResponse["stats"] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,13 +65,14 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
   const [slide, setSlide] = useState<"in" | "out">("in");
   const [searchPayload, setSearchPayload] = useState<SearchResponse | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [discoverBusy, setDiscoverBusy] = useState(false);
 
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/verify/queue", { cache: "no-store" });
       const data = (await res.json()) as QueueResponse;
-      const sorted = [...data.leads].sort(compareLeadsByPipelinePriority);
+      const sorted = [...data.leads].sort(compareVerifyQueue);
       setQueue(sorted);
       setStats(data.stats);
     } finally {
@@ -164,7 +175,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
         <p className="mt-1 text-sm text-slate-600">
           <strong>Every</strong> lead must pass this check before you can include them in a campaign launch (green ✓ on the Leads table).{" "}
           <strong>Ready for first touch</strong> does not auto-send email. Reject bins bad fits. Uncertain applies a score penalty without rejecting (see below). Queue
-          is sorted by score (highest first).
+          is sorted by <strong>date added</strong> (newest first), then score and lead type.
         </p>
         {stats ? (
           <>
@@ -174,7 +185,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
             </p>
             {stats.loaded !== undefined ? (
               <p className="mt-1 text-xs text-slate-600">
-                Carousel: <strong>{stats.loaded}</strong> lead(s) loaded (score desc, then name).
+                Carousel: <strong>{stats.loaded}</strong> lead(s) loaded (newest first, then score).
                 {stats.pending > stats.loaded && stats.cappedAt !== undefined ? (
                   <>
                     {" "}
@@ -187,6 +198,39 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
               </p>
             ) : null}
           </>
+        ) : null}
+        {onDiscoverPlaces ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-950">
+            <p className="font-medium">Google Places discovery (~5/day)</p>
+            <p className="mt-1 text-[11px] opacity-95">
+              Uses <strong>GOOGLE_PLACES_API_KEY</strong> (paid Maps Platform usage per Text Search request). New leads use{" "}
+              <strong>Scraped / External</strong> and appear at the top of this queue. Optional env{" "}
+              <code className="rounded bg-white/80 px-1">PLACES_DISCOVER_DEFAULT_QUERY</code> for the search phrase.
+            </p>
+            <button
+              type="button"
+              disabled={discoverBusy}
+              className="mt-2 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-brand-ink hover:bg-brand-dark disabled:opacity-50"
+              onClick={() => {
+                setDiscoverBusy(true);
+                void onDiscoverPlaces()
+                  .then((r) => {
+                    if (!r.ok) {
+                      window.alert(r.error ?? "Places discover failed.");
+                      return;
+                    }
+                    window.alert(
+                      `Created ${r.created ?? 0} lead(s), skipped ${r.skipped ?? 0}. Query: ${r.queryUsed ?? "—"}\n\n${(r.pricingNote ?? "").slice(0, 280)}${(r.pricingNote?.length ?? 0) > 280 ? "…" : ""}`
+                    );
+                    void loadQueue();
+                    void onRefresh();
+                  })
+                  .finally(() => setDiscoverBusy(false));
+              }}
+            >
+              {discoverBusy ? "Discovering…" : "Run Places discover (up to 5)"}
+            </button>
+          </div>
         ) : null}
       </header>
 
@@ -216,13 +260,34 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
               <div className="mt-4 space-y-2 text-sm">
                 <p>
                   <span className="text-slate-500">Email</span>{" "}
-                  <a className="font-medium text-brand-ink underline" href={`mailto:${current.email}`}>
-                    {current.email}
-                  </a>
+                  {current.email?.trim() ? (
+                    <a className="font-medium text-brand-ink underline" href={`mailto:${current.email}`}>
+                      {current.email}
+                    </a>
+                  ) : (
+                    <span className="font-medium text-slate-500">— (none)</span>
+                  )}
+                </p>
+                <p>
+                  <span className="text-slate-500">Date added</span>{" "}
+                  <span className="font-medium">{new Date(current.createdAt).toLocaleString()}</span>
                 </p>
                 <p>
                   <span className="text-slate-500">Phone</span> <span className="font-medium">{current.phone || "—"}</span>
                 </p>
+                {current.websiteUri?.trim() ? (
+                  <p>
+                    <span className="text-slate-500">Website</span>{" "}
+                    <a
+                      className="font-medium text-brand-ink underline break-all"
+                      href={current.websiteUri.startsWith("http") ? current.websiteUri : `https://${current.websiteUri}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {current.websiteUri}
+                    </a>
+                  </p>
+                ) : null}
                 <p>
                   <span className="text-slate-500">Location</span>{" "}
                   <span className="font-medium">
