@@ -93,7 +93,6 @@ export const ensureOwnerTestLead = async () => {
       addressConfidence: 95,
       confidenceNotes: "Manual owner test lead — verified address.",
       importedFromCsv: false,
-      deployVerifyVerdict: null,
       score: scored.score,
       conversionScore: scored.conversionScore,
       projectFitScore: scored.projectFitScore,
