@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type Dispatch,
+  type SetStateAction
+} from "react";
 import { appConfig } from "@/config/appConfig";
 import { ImportSummary } from "@/data/importLeads";
 import type { DashboardNotificationDTO } from "@/services/dashboardNotificationService";
@@ -34,6 +42,7 @@ import { compareLeadsForLibrary } from "@/services/scoringService";
 import { AutomationAuditBadges } from "@/components/ui/HandlingBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
 import { BookingStatusBadge, StatusBadge } from "@/components/ui/StatusBadge";
+import { GloriaDialogProvider, useGloriaDialogs } from "@/components/ui/GloriaDialogs";
 
 const MANUAL_LEAD_TYPES: LeadType[] = [
   "homeowner",
@@ -677,7 +686,7 @@ function InboxChatColumn({
   );
 }
 
-export function DashboardApp({
+function DashboardAppInner({
   initialLeads,
   initialCampaigns,
   initialInboxThreads,
@@ -723,6 +732,8 @@ export function DashboardApp({
     initialVoiceTrainingNotes,
     initialOutreachTestToActive
   );
+
+  const { alert: gloriaAlert, confirm: gloriaConfirm } = useGloriaDialogs();
 
   type LeadStatFilterAction =
     | "reset"
@@ -1152,22 +1163,38 @@ export function DashboardApp({
                 className="h-4 w-4 shrink-0 cursor-pointer accent-amber-400"
                 checked={vm.outreachDryRun}
                 disabled={vm.dryRunToggleBusy}
-                onChange={async (e) => {
-                  const wantDry = e.target.checked;
-                  if (!wantDry) {
-                    const ok = vm.outreachTestToActive
-                      ? window.confirm(
-                          "Turn OFF dry run? Resend will deliver real mail, but OUTREACH_TEST_TO is set — every outreach email goes only to that inbox (not to each lead’s address). Continue?"
-                        )
-                      : window.confirm(
-                          "Turn OFF dry run and send real email via Resend? Leads will receive actual messages at their own addresses. Continue?"
-                        );
-                    if (!ok) return;
+                onClick={(e) => {
+                  if (vm.dryRunToggleBusy) return;
+                  // Controlled checkbox + async confirm: if we let the browser uncheck first, `checked`
+                  // stays true until the API returns and the UI looks "stuck". Block the uncheck, confirm, then POST.
+                  if (vm.outreachDryRun) {
+                    e.preventDefault();
+                    void (async () => {
+                      const ok = vm.outreachTestToActive
+                        ? await gloriaConfirm(
+                            "Resend will deliver real mail, but OUTREACH_TEST_TO is set — every outreach email goes only to that inbox (not to each lead’s address). Continue?",
+                            "Turn off dry run?"
+                          )
+                        : await gloriaConfirm(
+                            "Leads will receive actual messages at their own addresses via Resend. Continue?",
+                            "Send real email?"
+                          );
+                      if (!ok) return;
+                      const r = await vm.setOutreachDryRunMode("live");
+                      if (!r.ok && r.error) {
+                        void gloriaAlert(r.error, "Dry run mode");
+                      }
+                    })();
                   }
-                  const r = await vm.setOutreachDryRunMode(wantDry ? "dry" : "live");
-                  if (!r.ok && r.error) {
-                    window.alert(r.error);
-                  }
+                }}
+                onChange={(e) => {
+                  if (!e.target.checked) return;
+                  void (async () => {
+                    const r = await vm.setOutreachDryRunMode("dry");
+                    if (!r.ok && r.error) {
+                      void gloriaAlert(r.error, "Dry run mode");
+                    }
+                  })();
                 }}
               />
               <span className="font-medium text-stone-200">Dry run</span>
@@ -1249,9 +1276,9 @@ export function DashboardApp({
                             });
                             if (!r.ok) {
                               if (r.error === "duplicate_email") {
-                                window.alert("A lead with this email already exists.");
+                                void gloriaAlert("A lead with this email already exists.", "Add lead");
                               } else {
-                                window.alert(`Could not add lead: ${r.error}`);
+                                void gloriaAlert(`Could not add lead: ${r.error}`, "Add lead");
                               }
                               return;
                             }
@@ -1437,18 +1464,19 @@ export function DashboardApp({
                         className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={async () => {
                           if (vm.selectedIds.length === 0) {
-                            window.alert("Select one or more leads in the table (checkboxes) before launching.");
+                            void gloriaAlert("Select one or more leads in the table (checkboxes) before launching.", "Launch campaign");
                             return;
                           }
                           const data = await vm.launchCampaign(campaignName, launchAddressOpts);
                           if (data && "ok" in data && data.ok && data.result) {
                             const r = data.result;
-                            window.alert(
+                            void gloriaAlert(
                               `${r.dryRun ? "Dry run" : "Live send"} complete: ${r.sentCount} sent · limit skips ${r.skippedByLimit} · ` +
-                                `addr policy ${r.skippedByAddressPolicy} · very poor ${r.skippedVeryPoor} · verify gate ${r.skippedByDeployVerify ?? 0} · DNC ${r.skippedDoNotContact}`
+                                `addr policy ${r.skippedByAddressPolicy} · very poor ${r.skippedVeryPoor} · verify gate ${r.skippedByDeployVerify ?? 0} · DNC ${r.skippedDoNotContact}`,
+                              "Campaign sent"
                             );
                           } else if (data && "ok" in data && !data.ok) {
-                            window.alert((data as { error?: string }).error ?? "Launch blocked.");
+                            void gloriaAlert((data as { error?: string }).error ?? "Launch blocked.", "Launch campaign");
                           }
                         }}
                       >
@@ -1667,9 +1695,10 @@ export function DashboardApp({
                             const id = libraryEditLeadId;
                             if (!id) return;
                             if (
-                              !window.confirm(
-                                "Delete this lead permanently? Related messages, follow-ups, bookings, and campaign links are removed."
-                              )
+                              !(await gloriaConfirm(
+                                "Related messages, follow-ups, bookings, and campaign links are removed. This cannot be undone.",
+                                "Delete this lead?"
+                              ))
                             ) {
                               return;
                             }
@@ -1677,10 +1706,11 @@ export function DashboardApp({
                             try {
                               const r = await vm.deleteLeadClient(id);
                               if (!r.ok) {
-                                window.alert(
+                                void gloriaAlert(
                                   r.error === "Unauthorized." || String(r.error ?? "").includes("Unauthorized")
                                     ? "Unauthorized — in production set NEXT_PUBLIC_ADMIN_API_KEY to match ADMIN_API_KEY."
-                                    : r.error ?? "Could not delete lead."
+                                    : r.error ?? "Could not delete lead.",
+                                  "Delete lead"
                                 );
                                 return;
                               }
@@ -1722,13 +1752,13 @@ export function DashboardApp({
                                   body: JSON.stringify({ profile: profileDraftToApiPayload(libraryEditDraft) })
                                 });
                                 if (res.status === 409) {
-                                  window.alert("That email is already used by another lead.");
+                                  void gloriaAlert("That email is already used by another lead.", "Save lead");
                                   return;
                                 }
                                 if (res.status === 400) {
                                   const err = (await res.json().catch(() => ({}))) as { error?: string };
                                   const code = err.error;
-                                  window.alert(
+                                  void gloriaAlert(
                                     code === "invalid_email"
                                       ? "Enter a valid email or leave it empty."
                                       : code === "full_name_required"
@@ -1737,12 +1767,13 @@ export function DashboardApp({
                                           ? "Invalid lead type."
                                           : code === "profile_required"
                                             ? "Invalid save request."
-                                            : "Could not save lead."
+                                            : "Could not save lead.",
+                                    "Save lead"
                                   );
                                   return;
                                 }
                                 if (!res.ok) {
-                                  window.alert("Could not save lead.");
+                                  void gloriaAlert("Could not save lead.", "Save lead");
                                   return;
                                 }
                                 setLibraryEditLeadId(null);
@@ -2039,11 +2070,12 @@ export function DashboardApp({
                     .placesDiscoverLeads({ limit: 5 })
                     .then((r) => {
                       if (!r.ok) {
-                        window.alert(r.error ?? "Places discover failed.");
+                        void gloriaAlert(r.error ?? "Places discover failed.", "Places discover");
                         return;
                       }
-                      window.alert(
-                        `Created ${r.created ?? 0} lead(s), skipped ${r.skipped ?? 0}. Query: ${r.queryUsed ?? "—"}\n\n${(r.pricingNote ?? "").slice(0, 280)}${(r.pricingNote?.length ?? 0) > 280 ? "…" : ""}`
+                      void gloriaAlert(
+                        `Created ${r.created ?? 0} lead(s), skipped ${r.skipped ?? 0}. Query: ${r.queryUsed ?? "—"}\n\n${(r.pricingNote ?? "").slice(0, 280)}${(r.pricingNote?.length ?? 0) > 280 ? "…" : ""}`,
+                        "Places discover"
                       );
                     })
                     .finally(() => setPlacesDiscoverBusy(false));
@@ -2090,7 +2122,7 @@ export function DashboardApp({
                 </p>
               ) : null}
               <p className="mb-4 text-[10px] text-slate-500">
-                Needs <code className="rounded bg-slate-100 px-1">ANTHROPIC_API_KEY</code>. URL-only lines fetch the page server-side (many sites block bots); if import
+                Needs <code className="rounded bg-slate-100 px-1">ANTHROPIC_API_KEY</code>. URL-only lines merge the pasted URL with same-origin contact-style paths server-side (many sites block bots); if import
                 fails, try Add lead manually. Production also needs matching <code className="rounded bg-slate-100 px-1">ADMIN_API_KEY</code> /{" "}
                 <code className="rounded bg-slate-100 px-1">NEXT_PUBLIC_ADMIN_API_KEY</code>.
               </p>
@@ -2565,9 +2597,10 @@ export function DashboardApp({
                 onSimulateBooking={() => simulationLeadId && void vm.simulateCalBookingConfirmation(simulationLeadId)}
                 onDispatchScheduledDue={() =>
                   void vm.dispatchScheduledDue(25).then((r) => {
-                    window.alert(
+                    void gloriaAlert(
                       `Dispatched: ${r.dispatched ?? 0} · skipped: ${r.skipped ?? 0}` +
-                        ((r.errors?.length ? "\nErrors:\n" + r.errors.slice(0, 5).join("\n") : "") || "")
+                        ((r.errors?.length ? "\nErrors:\n" + r.errors.slice(0, 5).join("\n") : "") || ""),
+                      "Scheduled due"
                     );
                   })
                 }
@@ -2580,7 +2613,7 @@ export function DashboardApp({
                   className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-brand-ink/90 shadow-sm hover:bg-slate-50"
                   onClick={() =>
                     void vm.seedInboxSamples().then((r) => {
-                      if (r?.ok === false && r.error) window.alert(r.error);
+                      if (r?.ok === false && r.error) void gloriaAlert(r.error, "Seed inbox");
                     })
                   }
                 >
@@ -2591,22 +2624,28 @@ export function DashboardApp({
                   type="button"
                   className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-950 hover:bg-rose-100"
                   onClick={() => {
-                    if (
-                      !window.confirm(
-                        "Clean slate: delete all messages, campaigns, inbound replies, follow-ups, bookings, and notifications; reset every lead to New with Verify cleared (DNC and scores kept). Continue?"
-                      )
-                    ) {
-                      return;
-                    }
-                    void vm.cleanSlateOutreach().then((r) => {
-                      if (!r?.ok) {
-                        window.alert((r as { error?: string })?.error ?? "Clean slate failed (check ALLOW_DEV_ROUTES + admin key).");
+                    void (async () => {
+                      if (
+                        !(await gloriaConfirm(
+                          "Deletes all messages, campaigns, inbound replies, follow-ups, bookings, and notifications; resets every lead to New with Verify cleared (DNC and scores kept).",
+                          "Clean slate?"
+                        ))
+                      ) {
                         return;
                       }
-                      window.alert(
-                        `Clean slate done. Leads reset: ${r.leadsReset ?? "?"}. Deleted: ${JSON.stringify(r.deleted ?? {})}`
+                      const r = await vm.cleanSlateOutreach();
+                      if (!r?.ok) {
+                        void gloriaAlert(
+                          (r as { error?: string })?.error ?? "Clean slate failed (check ALLOW_DEV_ROUTES + admin key).",
+                          "Clean slate"
+                        );
+                        return;
+                      }
+                      void gloriaAlert(
+                        `Leads reset: ${r.leadsReset ?? "?"}. Deleted: ${JSON.stringify(r.deleted ?? {})}`,
+                        "Clean slate done"
                       );
-                    });
+                    })();
                   }}
                 >
                   Clean slate (outreach data)
@@ -2774,5 +2813,13 @@ export function DashboardApp({
         </main>
       </div>
     </div>
+  );
+}
+
+export function DashboardApp(props: ComponentProps<typeof DashboardAppInner>) {
+  return (
+    <GloriaDialogProvider>
+      <DashboardAppInner {...props} />
+    </GloriaDialogProvider>
   );
 }

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/AddressConfidenceBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
 import { LeadProfileForm } from "@/components/dashboard/LeadProfileForm";
+import { useGloriaDialogs } from "@/components/ui/GloriaDialogs";
 
 type QueueResponse = {
   leads: Lead[];
@@ -46,6 +47,7 @@ type SearchResponse =
     };
 
 export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> | void }) {
+  const { alert: gloriaAlert } = useGloriaDialogs();
   const [queue, setQueue] = useState<Lead[]>([]);
   const [stats, setStats] = useState<QueueResponse["stats"] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -128,7 +130,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
         body: JSON.stringify({ verdict: "unknown" })
       });
       if (!res.ok) {
-        window.alert("Could not save uncertain verdict.");
+        void gloriaAlert("Could not save uncertain verdict.", "Verify");
         setSlide("in");
         setBusy(false);
         return;
@@ -154,7 +156,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
         body: JSON.stringify({ verdict, profile: profileDraftToApiPayload(editProfile) })
       });
       if (res.status === 409) {
-        window.alert("That email is already used by another lead.");
+        void gloriaAlert("That email is already used by another lead.", "Verify");
         setSlide("in");
         return;
       }
@@ -169,12 +171,12 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
               : code === "invalid_lead_type"
                 ? "Invalid lead type."
                 : "Could not save decision.";
-        window.alert(msg);
+        void gloriaAlert(msg, "Verify");
         setSlide("in");
         return;
       }
       if (!res.ok) {
-        window.alert("Could not save decision.");
+        void gloriaAlert("Could not save decision.", "Verify");
         setSlide("in");
         return;
       }

@@ -6,6 +6,92 @@ import { createManualLead } from "@/services/persistenceService";
 const MAX_PAGE_CHARS = 120_000;
 const FETCH_TIMEOUT_MS = 14_000;
 
+/** Same-origin paths only — no arbitrary crawling off the pasted URL. */
+const WELL_KNOWN_CONTACT_PATHS = [
+  "/",
+  "/contact",
+  "/contact-us",
+  "/contactus",
+  "/inquiry",
+  "/get-in-touch",
+  "/getintouch",
+  "/reach-us",
+  "/about"
+] as const;
+
+const MAX_IMPORT_URL_ATTEMPTS = 8;
+const IMPORT_PER_PAGE_CHARS = 16_000;
+const IMPORT_COMBINED_MAX_CHARS = 65_000;
+
+function canonicalSiteUrlKey(href: string): string {
+  const u = new URL(href);
+  u.hash = "";
+  const path = u.pathname.replace(/\/+$/, "") || "/";
+  return `${u.origin}${path}`.toLowerCase();
+}
+
+export function buildWebsiteImportCandidateUrls(seedUrl: string): string[] {
+  let parsed: URL;
+  try {
+    parsed = new URL(seedUrl);
+  } catch {
+    return [];
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return [];
+  if (isBlockedHostname(parsed.hostname)) return [];
+
+  const origin = parsed.origin;
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+
+  const push = (href: string) => {
+    const k = canonicalSiteUrlKey(href);
+    if (seen.has(k)) return;
+    seen.add(k);
+    const u = new URL(href);
+    u.hash = "";
+    ordered.push(u.toString());
+  };
+
+  push(seedUrl);
+  for (const p of WELL_KNOWN_CONTACT_PATHS) {
+    push(p === "/" ? `${origin}/` : `${origin}${p}`);
+  }
+  return ordered.slice(0, MAX_IMPORT_URL_ATTEMPTS);
+}
+
+export async function gatherWebsiteImportPlainText(seedUrl: string): Promise<
+  | { ok: true; combinedText: string; successfulUrls: string[] }
+  | { ok: false; error: string }
+> {
+  const urls = buildWebsiteImportCandidateUrls(seedUrl);
+  if (!urls.length) return { ok: false, error: "Invalid or disallowed URL." };
+
+  const parts: string[] = [];
+  const successful: string[] = [];
+  let lastError = "Could not load any page.";
+
+  for (const url of urls) {
+    const joinedSoFar = parts.join("\n\n");
+    if (joinedSoFar.length >= IMPORT_COMBINED_MAX_CHARS) break;
+
+    const r = await fetchPublicPageAsText(url);
+    if (!r.ok) {
+      lastError = r.error;
+      continue;
+    }
+    successful.push(url);
+    parts.push(`--- Page: ${url} ---\n${r.text.slice(0, IMPORT_PER_PAGE_CHARS)}`);
+  }
+
+  if (successful.length === 0) {
+    return { ok: false, error: lastError };
+  }
+
+  const combinedText = parts.join("\n\n").slice(0, IMPORT_COMBINED_MAX_CHARS);
+  return { ok: true, combinedText, successfulUrls: successful };
+}
+
 const LEAD_TYPES: LeadType[] = [
   "homeowner",
   "designer",
@@ -185,19 +271,21 @@ export async function importLeadFromWebsiteUrl(pageUrl: string): Promise<
   | { ok: true; mode: "lead_created"; id: string; summary: string }
   | { ok: false; error: string }
 > {
-  const fetched = await fetchPublicPageAsText(pageUrl);
-  if (!fetched.ok) return { ok: false, error: fetched.error };
+  const gathered = await gatherWebsiteImportPlainText(pageUrl);
+  if (!gathered.ok) return { ok: false, error: gathered.error };
 
   const system = `You extract structured contact data from noisy webpage text for a B2B CRM. Output ONLY valid JSON, no markdown.
 Keys: firstName, lastName, fullName (optional), email, company, phone, city, state, zip, leadType.
 leadType must be one of: ${LEAD_TYPES.join(", ")} — infer from business (design firm→designer, architect→architect, builder/GC→builder, cabinet→cabinet shop).
-Rules: Never invent an email. If multiple emails, prefer a human contact (not noreply@, not generic info@ if a named person email exists). If no email in text, set email to empty string.`;
+Rules: Never invent an email. If multiple emails, prefer a human contact (not noreply@, not generic info@ if a named person email exists). If no email in text, set email to empty string. Text may combine several pages from the same site — prefer contact / team / about sections.`;
 
-  const user = `Source URL: ${pageUrl}
+  const user = `Primary URL: ${pageUrl}
 
-Plain text from page (truncated):
+Merged plain text from ${gathered.successfulUrls.length} page(s): ${gathered.successfulUrls.join(", ")}
+
+(truncated)
 ---
-${fetched.text.slice(0, 60_000)}
+${gathered.combinedText}
 ---
 
 Return one JSON object only.`;
