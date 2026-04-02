@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Lead } from "@/types/lead";
+import { compareLeadsByPipelinePriority } from "@/services/scoringService";
 import {
   ADDRESS_CONFIDENCE_TOOLTIP,
   AddressConfidenceBadge
@@ -60,9 +61,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
     try {
       const res = await fetch("/api/verify/queue", { cache: "no-store" });
       const data = (await res.json()) as QueueResponse;
-      const sorted = [...data.leads].sort(
-        (a, b) => b.score - a.score || (a.fullName || "").localeCompare(b.fullName || "") || a.id.localeCompare(b.id)
-      );
+      const sorted = [...data.leads].sort(compareLeadsByPipelinePriority);
       setQueue(sorted);
       setStats(data.stats);
     } finally {
@@ -164,7 +163,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
         <h2 className="text-lg font-semibold text-brand-ink">Pre-deploy verify</h2>
         <p className="mt-1 text-sm text-slate-600">
           <strong>Every</strong> lead must pass this check before you can include them in a campaign launch (green ✓ on the Leads table).{" "}
-          <strong>Approve for send</strong> does not auto-send email. Reject bins bad fits. Uncertain applies a score penalty without rejecting (see below). Queue
+          <strong>Ready for first touch</strong> does not auto-send email. Reject bins bad fits. Uncertain applies a score penalty without rejecting (see below). Queue
           is sorted by score (highest first).
         </p>
         {stats ? (
@@ -243,7 +242,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
                   <span className="text-slate-500">· {current.priorityTier}</span>
                 </p>
                 <p className="text-xs text-amber-900">
-                  Campaign send: <strong>requires Approve for send</strong> on this screen first (all leads, any score).
+                  Campaign send: <strong>requires Ready for first touch</strong> on this screen first (all leads, any score).
                 </p>
                 <p className="flex flex-wrap items-center gap-2">
                   <span className="text-slate-500" title={ADDRESS_CONFIDENCE_TOOLTIP}>
@@ -324,7 +323,7 @@ export function VerifyWorkbench({ onRefresh }: { onRefresh: () => Promise<void> 
               <span className="text-2xl" aria-hidden>
                 👍
               </span>
-              Approve for send
+              Ready for first touch
             </button>
             <button
               type="button"

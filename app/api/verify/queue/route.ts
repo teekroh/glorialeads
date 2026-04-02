@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { mapDbLeadToLead } from "@/lib/mappers";
 import { DEPLOY_VERIFY_MIN_SCORE } from "@/services/deployVerifyPolicy";
+import { compareLeadsByPipelinePriority } from "@/services/scoringService";
 
 /** Max leads returned in one response (browser memory). `stats.pending` is always the full count. */
 const VERIFY_QUEUE_MAX = 2000;
@@ -31,6 +32,7 @@ export async function GET() {
   });
 
   const leads = rows.map(mapDbLeadToLead);
+  leads.sort(compareLeadsByPipelinePriority);
   return NextResponse.json({
     leads,
     stats: {

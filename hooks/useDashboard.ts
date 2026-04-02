@@ -18,6 +18,7 @@ import { Lead, LeadSource, LeadStatus, LeadType, PriorityTier } from "@/types/le
 import type { DashboardNotificationDTO } from "@/services/dashboardNotificationService";
 import type { VoiceTrainScenarioKind } from "@/config/voiceTrainScenarios";
 import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
+import { compareLeadsByPipelinePriority } from "@/services/scoringService";
 
 export type AddressQuickFilter = "all" | "verified_86" | "reachable_71" | "needs_review_under_71";
 
@@ -148,46 +149,46 @@ export const useDashboard = (
     setNotifications((prev) => prev.map((n) => (ids.includes(n.id) ? { ...n, readAt: new Date().toISOString() } : n)));
   };
 
-  const filtered = useMemo(
-    () =>
-      leads.filter((lead) => {
-        if (filters.source !== "all" && lead.source !== filters.source) return false;
-        if (filters.leadType !== "all" && lead.leadType !== filters.leadType) return false;
-        if (filters.priorityTier !== "all" && lead.priorityTier !== filters.priorityTier) return false;
-        if (filters.status !== "all" && lead.status !== filters.status) return false;
-        if (filters.projectTier !== "all" && lead.estimatedProjectTier !== filters.projectTier) return false;
-        if (lead.distanceMinutes > filters.maxDistance) return false;
-        if (filters.contacted === "contacted" && !lead.lastContactedAt) return false;
-        if (filters.contacted === "not_contacted" && lead.lastContactedAt) return false;
-        if (filters.query) {
-          const q = filters.query.toLowerCase();
-          if (
-            !`${lead.fullName} ${lead.email} ${lead.company} ${lead.city} ${lead.state}`.toLowerCase().includes(q)
-          )
-            return false;
-        }
-        const ascore = numericAddressScore(lead);
-        if (filters.addressQuick === "verified_86") {
-          if (ascore === null || ascore < 86) return false;
-        }
-        if (filters.addressQuick === "reachable_71") {
-          if (ascore === null || ascore < OUTREACH_ADDRESS_MIN_DEFAULT) return false;
-        }
-        if (filters.addressQuick === "needs_review_under_71") {
-          if (ascore !== null && ascore >= OUTREACH_ADDRESS_MIN_DEFAULT) return false;
-        }
-        if (filters.addressBand !== "all") {
-          const b = addressConfidenceBand(lead.addressConfidence);
-          if (b !== filters.addressBand) return false;
-        }
-        const minN = filters.addressConfidenceMin.trim() ? Number(filters.addressConfidenceMin) : NaN;
-        if (Number.isFinite(minN) && (ascore === null || ascore < minN)) return false;
-        const maxN = filters.addressConfidenceMax.trim() ? Number(filters.addressConfidenceMax) : NaN;
-        if (Number.isFinite(maxN) && (ascore === null || ascore > maxN)) return false;
-        return true;
-      }),
-    [filters, leads]
-  );
+  const filtered = useMemo(() => {
+    const out = leads.filter((lead) => {
+      if (filters.source !== "all" && lead.source !== filters.source) return false;
+      if (filters.leadType !== "all" && lead.leadType !== filters.leadType) return false;
+      if (filters.priorityTier !== "all" && lead.priorityTier !== filters.priorityTier) return false;
+      if (filters.status !== "all" && lead.status !== filters.status) return false;
+      if (filters.projectTier !== "all" && lead.estimatedProjectTier !== filters.projectTier) return false;
+      if (lead.distanceMinutes > filters.maxDistance) return false;
+      if (filters.contacted === "contacted" && !lead.lastContactedAt) return false;
+      if (filters.contacted === "not_contacted" && lead.lastContactedAt) return false;
+      if (filters.query) {
+        const q = filters.query.toLowerCase();
+        if (
+          !`${lead.fullName} ${lead.email} ${lead.company} ${lead.city} ${lead.state}`.toLowerCase().includes(q)
+        )
+          return false;
+      }
+      const ascore = numericAddressScore(lead);
+      if (filters.addressQuick === "verified_86") {
+        if (ascore === null || ascore < 86) return false;
+      }
+      if (filters.addressQuick === "reachable_71") {
+        if (ascore === null || ascore < OUTREACH_ADDRESS_MIN_DEFAULT) return false;
+      }
+      if (filters.addressQuick === "needs_review_under_71") {
+        if (ascore !== null && ascore >= OUTREACH_ADDRESS_MIN_DEFAULT) return false;
+      }
+      if (filters.addressBand !== "all") {
+        const b = addressConfidenceBand(lead.addressConfidence);
+        if (b !== filters.addressBand) return false;
+      }
+      const minN = filters.addressConfidenceMin.trim() ? Number(filters.addressConfidenceMin) : NaN;
+      if (Number.isFinite(minN) && (ascore === null || ascore < minN)) return false;
+      const maxN = filters.addressConfidenceMax.trim() ? Number(filters.addressConfidenceMax) : NaN;
+      if (Number.isFinite(maxN) && (ascore === null || ascore > maxN)) return false;
+      return true;
+    });
+    out.sort(compareLeadsByPipelinePriority);
+    return out;
+  }, [filters, leads]);
 
   const metrics = useMemo(() => {
     const replies = leads.flatMap((l) => l.replyHistory);

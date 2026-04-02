@@ -12,14 +12,47 @@ export interface ScoreBreakdown {
   largeProjectPenalty: number;
 }
 
+/** Trade types (designer / builder / etc.) are weighted far above homeowner so pipeline sorts surface pros first. */
 const leadTypeWeights: Record<LeadType, number> = {
-  homeowner: 18,
-  designer: 14,
-  builder: 15,
-  architect: 12,
-  "cabinet shop": 10,
-  "commercial builder": 9
+  homeowner: 6,
+  designer: 26,
+  builder: 26,
+  architect: 25,
+  "cabinet shop": 20,
+  "commercial builder": 24
 };
+
+/** When scores tie, higher rank sorts first (trade before homeowner). */
+function tradePipelineRank(leadType: LeadType): number {
+  switch (leadType) {
+    case "designer":
+    case "architect":
+    case "builder":
+    case "commercial builder":
+      return 4;
+    case "cabinet shop":
+      return 3;
+    case "homeowner":
+      return 0;
+    default:
+      return 0;
+  }
+}
+
+/** Sort key for lead tables and Verify: best score first, then trade over homeowner, then name. */
+export function compareLeadsByPipelinePriority(
+  a: Pick<Lead, "id" | "score" | "fullName" | "leadType">,
+  b: Pick<Lead, "id" | "score" | "fullName" | "leadType">
+): number {
+  if (b.score !== a.score) return b.score - a.score;
+  const ra = tradePipelineRank(a.leadType);
+  const rb = tradePipelineRank(b.leadType);
+  if (rb !== ra) return rb - ra;
+  const na = (a.fullName || "").toLowerCase();
+  const nb = (b.fullName || "").toLowerCase();
+  if (na !== nb) return na.localeCompare(nb);
+  return a.id.localeCompare(b.id);
+}
 
 export function estimateProjectTier(amountSpent: number): ProjectTier {
   if (amountSpent <= 20000) return "Sub-$20k";
@@ -57,7 +90,8 @@ export function scoreLeadBase(lead: Pick<Lead, "distanceMinutes" | "amountSpent"
   const leadTypeScore = leadTypeWeights[lead.leadType];
   const intentSignalScore = lead.distanceMinutes <= 35 ? 10 : 6;
   const projectFitScore = tier === "$20k-$40k" ? 20 : tier === "Sub-$20k" ? 12 : 8;
-  const relationshipScore = lead.leadType === "homeowner" ? 8 : 5;
+  const relationshipScore =
+    lead.leadType === "homeowner" ? 3 : lead.leadType === "cabinet shop" ? 9 : 10;
   const conversionProbabilityScore = Math.min(18, Math.max(5, 30 - lead.distanceMinutes / 3));
   const largeProjectPenalty = tier === "$300k+" ? 35 : 0;
 

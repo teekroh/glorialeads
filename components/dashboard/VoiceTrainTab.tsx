@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { VOICE_TRAIN_SCENARIOS, type VoiceTrainScenarioKind } from "@/config/voiceTrainScenarios";
 import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
 import type { Lead } from "@/types/lead";
+import { compareLeadsByPipelinePriority } from "@/services/scoringService";
 
 const SCENARIO_LABELS: Record<VoiceTrainScenarioKind, string> = {
   first_touch: "Cold first touch",
@@ -43,7 +44,7 @@ export function VoiceTrainTab({
     () =>
       [...leads]
         .filter((l) => !l.doNotContact)
-        .sort((a, b) => b.score - a.score || (a.fullName || "").localeCompare(b.fullName || ""))
+        .sort(compareLeadsByPipelinePriority)
         .slice(0, 80),
     [leads]
   );
@@ -130,6 +131,20 @@ export function VoiceTrainTab({
               </>
             )}
           </select>
+          <button
+            type="button"
+            disabled={trainLeadOptions.length === 0}
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-brand-ink hover:bg-slate-50 disabled:opacity-50"
+            onClick={() => {
+              const pool = trainLeadOptions.filter((l) => l.id);
+              if (!pool.length) return;
+              const pick = pool[Math.floor(Math.random() * pool.length)]!;
+              setSelectedLeadId(pick.id);
+              setNotice(null);
+            }}
+          >
+            Random CRM lead
+          </button>
           <label className="block text-sm font-medium text-brand-ink" htmlFor="train-scenario">
             Scenario
           </label>

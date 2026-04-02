@@ -24,11 +24,11 @@ import { Campaign } from "@/types/campaign";
 import type { LeadType } from "@/types/lead";
 import { Lead } from "@/types/lead";
 import { CampaignSequenceTree } from "@/components/dashboard/CampaignSequenceTree";
-import { NotificationsPanel } from "@/components/dashboard/NotificationsPanel";
 import { SimulationPanel } from "@/components/dashboard/SimulationPanel";
 import { VoiceTrainTab } from "@/components/dashboard/VoiceTrainTab";
 import type { VoiceTrainingNoteDTO } from "@/services/voiceTrainingStorage";
 import { VerifyWorkbench } from "@/components/dashboard/VerifyWorkbench";
+import { compareLeadsByPipelinePriority } from "@/services/scoringService";
 import { AutomationAuditBadges } from "@/components/ui/HandlingBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
 import { BookingStatusBadge, StatusBadge } from "@/components/ui/StatusBadge";
@@ -46,7 +46,6 @@ const INBOX_TABS = ["Interested", "Booking Sent", "Needs Review", "Not Now", "Su
 
 /** Sidebar order: Dashboard → Inbox → Train → Campaigns → Bookings → Leads → Verify → Simulation */
 const SIDEBAR_VIEWS = ["dashboard", "inbox", "train", "campaigns", "bookings", "leads", "verify", "simulation"] as const;
-const LITE_SIDEBAR_VIEWS = ["inbox", "bookings"] as const;
 
 function inboxTabMatches(thread: InboxThread, lead: Lead | undefined, tab: (typeof INBOX_TABS)[number]): boolean {
   if (!lead) return false;
@@ -753,7 +752,7 @@ export function DashboardApp({
   useEffect(() => {
     if (!vm.leads.length) return;
     if (simulationLeadId && vm.leads.some((l) => l.id === simulationLeadId)) return;
-    const top = [...vm.leads].sort((a, b) => b.score - a.score)[0];
+    const top = [...vm.leads].sort(compareLeadsByPipelinePriority)[0];
     setSimulationLeadId(top?.id ?? null);
   }, [vm.leads, simulationLeadId]);
   const [campaignName, setCampaignName] = useState("Kitchen Intro Sprint");
@@ -762,7 +761,6 @@ export function DashboardApp({
   const [campaignConfirmLow, setCampaignConfirmLow] = useState(false);
   const [campaignOverrideVerify, setCampaignOverrideVerify] = useState(false);
   const [activeView, setActiveView] = useState<(typeof SIDEBAR_VIEWS)[number]>("dashboard");
-  const [liteMode, setLiteMode] = useState(false);
   const [dashboardTab, setDashboardTab] = useState<"active" | "lost">("active");
   const [bookingDetailPick, setBookingDetailPick] = useState<BookingInviteRow | null>(null);
   const [inboxLeadId, setInboxLeadId] = useState<string | null>(null);
@@ -809,14 +807,6 @@ export function DashboardApp({
     });
   const inboxLead = vm.leads.find((l) => l.id === inboxLeadId) ?? null;
 
-  const visibleViews = liteMode ? LITE_SIDEBAR_VIEWS : SIDEBAR_VIEWS;
-
-  useEffect(() => {
-    if (liteMode && !LITE_SIDEBAR_VIEWS.includes(activeView as (typeof LITE_SIDEBAR_VIEWS)[number])) {
-      setActiveView("inbox");
-    }
-  }, [liteMode, activeView]);
-
   const inboxByTab = useMemo(() => {
     const map = {} as Record<(typeof INBOX_TABS)[number], InboxThread[]>;
     for (const tab of INBOX_TABS) {
@@ -827,6 +817,8 @@ export function DashboardApp({
     }
     return map;
   }, [vm.inboxThreads, vm.leads]);
+
+  const inboxNeedsReviewCount = inboxByTab["Needs Review"].length;
 
   useEffect(() => {
     if (!inboxLeadId) {
@@ -1020,7 +1012,7 @@ export function DashboardApp({
     () =>
       [...vm.leads]
         .filter((l) => !l.doNotContact)
-        .sort((a, b) => b.score - a.score || (a.fullName || "").localeCompare(b.fullName || ""))
+        .sort(compareLeadsByPipelinePriority)
         .slice(0, 8),
     [vm.leads]
   );
@@ -1028,125 +1020,88 @@ export function DashboardApp({
   return (
     <div className="min-h-screen">
       <div className="grid min-h-screen grid-cols-[250px_1fr]">
-        <aside className="border-r border-white/10 bg-brand-ink p-4 text-stone-100">
-          <div className="mb-6 flex items-center justify-center gap-3 px-1">
-            <img src="/gloria-logo.svg" alt="" className="h-11 w-auto shrink-0 max-w-[120px] opacity-95" aria-hidden />
+        <aside className="flex min-h-screen flex-col border-r border-white/10 bg-brand-ink p-4 text-stone-100">
+          <div className="mb-6 flex items-center justify-center gap-2 px-1">
+            <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-stone-400">Leads</span>
+            <img src="/gloria-logo.svg" alt="" className="h-11 w-auto shrink-0 max-w-[100px] opacity-95" aria-hidden />
             <span className="font-semibold tracking-tight text-xl text-stone-100">Gloria</span>
           </div>
-          <nav className="space-y-2 text-sm">
-            {visibleViews.map((v) => (
+          <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto text-sm">
+            {SIDEBAR_VIEWS.map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setActiveView(v)}
-                className={`block w-full rounded px-3 py-2 text-left capitalize ${activeView === v ? "bg-brand font-medium text-brand-ink shadow-sm" : "text-stone-100 hover:bg-brand-inkLight"}`}
+                className={`relative block w-full rounded px-3 py-2 pr-9 text-left capitalize ${activeView === v ? "bg-brand font-medium text-brand-ink shadow-sm" : "text-stone-100 hover:bg-brand-inkLight"}`}
               >
                 {v}
+                {v === "inbox" && inboxNeedsReviewCount > 0 ? (
+                  <span
+                    className="absolute right-2 top-1/2 flex h-5 min-w-5 -translate-y-1/2 items-center justify-center rounded-full bg-orange-400 px-1 text-[10px] font-bold leading-none text-brand-ink"
+                    aria-label={`${inboxNeedsReviewCount} in Needs Review`}
+                  >
+                    {inboxNeedsReviewCount > 99 ? "99+" : inboxNeedsReviewCount}
+                  </span>
+                ) : null}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => setLiteMode((v) => !v)}
-              className={`mt-2 block w-full rounded border px-3 py-2 text-left text-xs font-medium ${
-                liteMode
-                  ? "border-stone-300 bg-stone-100 text-brand-ink"
-                  : "border-white/20 text-stone-200 hover:bg-brand-inkLight"
-              }`}
-            >
-              {liteMode ? "Lite mode: Inbox + Bookings" : "Switch to Lite mode"}
-            </button>
-            <button
-              type="button"
-              onClick={exportData}
-              className="mt-2 block w-full rounded border border-white/20 px-3 py-2 text-left text-xs font-medium text-stone-200 hover:bg-brand-inkLight hover:text-white"
-            >
-              Export (includes source)
-            </button>
           </nav>
+          <div
+            className="mt-4 border-t border-white/15 pt-3 text-[11px] text-stone-300"
+            title={
+              `${vm.outreachDryRun ? "Dry run — Resend does not deliver outreach." : "Live — Resend delivers real mail."} .env DRY_RUN default: ${vm.outreachDryRunEnvDefault ? "on" : "off"}.` +
+              (vm.outreachDryRunOverride === null
+                ? " Dashboard override: none."
+                : vm.outreachDryRunOverride
+                  ? " Dashboard override: force dry."
+                  : " Dashboard override: force live.") +
+              (vm.outreachTestToActive
+                ? " OUTREACH_TEST_TO is on — outreach To: is your test inbox only."
+                : "")
+            }
+          >
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-checked={vm.outreachDryRun}
+                className="h-4 w-4 shrink-0 cursor-pointer accent-amber-400"
+                checked={vm.outreachDryRun}
+                disabled={vm.dryRunToggleBusy}
+                onChange={async (e) => {
+                  const wantDry = e.target.checked;
+                  if (!wantDry) {
+                    const ok = vm.outreachTestToActive
+                      ? window.confirm(
+                          "Turn OFF dry run? Resend will deliver real mail, but OUTREACH_TEST_TO is set — every outreach email goes only to that inbox (not to each lead’s address). Continue?"
+                        )
+                      : window.confirm(
+                          "Turn OFF dry run and send real email via Resend? Leads will receive actual messages at their own addresses. Continue?"
+                        );
+                    if (!ok) return;
+                  }
+                  const r = await vm.setOutreachDryRunMode(wantDry ? "dry" : "live");
+                  if (!r.ok && r.error) {
+                    window.alert(r.error);
+                  }
+                }}
+              />
+              <span className="font-medium text-stone-200">Dry run</span>
+            </label>
+            {vm.outreachDryRunOverride !== null ? (
+              <button
+                type="button"
+                disabled={vm.dryRunToggleBusy}
+                className="mt-2 w-full rounded border border-white/25 px-2 py-1 text-[10px] font-medium text-stone-200 hover:bg-brand-inkLight"
+                onClick={() => void vm.setOutreachDryRunMode("env_default")}
+              >
+                Use .env only
+              </button>
+            ) : null}
+          </div>
         </aside>
 
         <main className="p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div
-              className={`flex max-w-xl flex-1 flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
-                vm.outreachDryRun
-                  ? "border-amber-200 bg-amber-50/90 text-amber-950"
-                  : "border-rose-300 bg-rose-50/95 text-rose-950"
-              }`}
-            >
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="font-semibold">{vm.outreachDryRun ? "Dry run — emails are not delivered" : "Live sends — Resend delivers real mail"}</span>
-                <span className="text-[11px] opacity-90">
-                  .env DRY_RUN default: {vm.outreachDryRunEnvDefault ? "on" : "off"}
-                  {vm.outreachDryRunOverride === null
-                    ? " · Dashboard override: none"
-                    : vm.outreachDryRunOverride
-                      ? " · Dashboard override: force dry"
-                      : " · Dashboard override: force live"}
-                  {vm.outreachTestToActive ? (
-                    <>
-                      {" "}
-                      · <strong>OUTREACH_TEST_TO</strong> on — outreach Resend <strong>To:</strong> is your test inbox only (not each lead&apos;s address).
-                    </>
-                  ) : null}
-                </span>
-                {!vm.outreachDryRun && vm.outreachTestToActive ? (
-                  <span className="text-[11px] text-slate-700">
-                    Owner meeting alerts still use <code className="rounded bg-white/70 px-1">OWNER_NOTIFY_EMAIL</code> / reply-to. Dev{" "}
-                    <code className="rounded bg-white/70 px-1">/api/test-email</code> uses its own To if enabled.
-                  </span>
-                ) : null}
-              </div>
-              <label className="flex cursor-pointer items-center gap-2 shrink-0">
-                <span className="text-xs font-medium">Dry run</span>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-checked={vm.outreachDryRun}
-                  className="h-5 w-5 cursor-pointer accent-amber-800"
-                  checked={vm.outreachDryRun}
-                  disabled={vm.dryRunToggleBusy}
-                  onChange={async (e) => {
-                    const wantDry = e.target.checked;
-                    if (!wantDry) {
-                      const ok = vm.outreachTestToActive
-                        ? window.confirm(
-                            "Turn OFF dry run? Resend will deliver real mail, but OUTREACH_TEST_TO is set — every outreach email goes only to that inbox (not to each lead’s address). Continue?"
-                          )
-                        : window.confirm(
-                            "Turn OFF dry run and send real email via Resend? Leads will receive actual messages at their own addresses. Continue?"
-                          );
-                      if (!ok) return;
-                    }
-                    const r = await vm.setOutreachDryRunMode(wantDry ? "dry" : "live");
-                    if (!r.ok && r.error) {
-                      window.alert(r.error);
-                    }
-                  }}
-                />
-              </label>
-              {vm.outreachDryRunOverride !== null ? (
-                <button
-                  type="button"
-                  disabled={vm.dryRunToggleBusy}
-                  className="shrink-0 rounded border border-slate-400/60 bg-white/80 px-2 py-1 text-[11px] font-medium hover:bg-white"
-                  onClick={() => void vm.setOutreachDryRunMode("env_default")}
-                >
-                  Use .env only
-                </button>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <NotificationsPanel items={vm.notifications} onMarkRead={(ids) => vm.markNotificationsRead(ids)} />
-              <button
-                type="button"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                onClick={() => void vm.refresh()}
-              >
-                Refresh data
-              </button>
-            </div>
-          </div>
           {!vm.bookingLinkConfigured && (
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
               <p className="font-semibold">BOOKING_LINK not configured</p>
@@ -1466,20 +1421,29 @@ export function DashboardApp({
                     <div>
                       <h2 className="text-lg font-semibold text-brand-ink">Lead library</h2>
                       <p className="mt-0.5 text-xs text-slate-600">
-                        Sorted by <strong>score</strong> (highest first). Filter, multi-select with checkboxes, preview first-touch copy, and launch campaigns to the
-                        selected audience.
+                        Sorted by <strong>score</strong> (trade types rank above homeowners at the same score). Filter, multi-select with checkboxes, preview first-touch
+                        copy, and launch campaigns to the selected audience.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-dark"
-                      onClick={() => {
-                        resetAddLeadForm();
-                        setAddLeadOpen(true);
-                      }}
-                    >
-                      Add lead
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-slate-50"
+                        onClick={exportData}
+                      >
+                        Export (includes source)
+                      </button>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-dark"
+                        onClick={() => {
+                          resetAddLeadForm();
+                          setAddLeadOpen(true);
+                        }}
+                      >
+                        Add lead
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="p-4">
@@ -1580,7 +1544,7 @@ export function DashboardApp({
                       </tr>
                     </thead>
                     <tbody>
-                      {[...vm.filtered].sort((a, b) => b.score - a.score).map((lead) => (
+                      {vm.filtered.map((lead) => (
                         <tr key={lead.id} className="border-t hover:bg-slate-50">
                           <td className="p-2"><input type="checkbox" checked={vm.selectedIds.includes(lead.id)} onChange={(e) => vm.setSelectedIds((ids) => e.target.checked ? [...ids, lead.id] : ids.filter((id) => id !== lead.id))} /></td>
                           <td className="p-2">
@@ -2160,7 +2124,7 @@ export function DashboardApp({
                       value={simulationLeadId ?? ""}
                       onChange={(e) => setSimulationLeadId(e.target.value || null)}
                     >
-                      {[...vm.leads].sort((a, b) => b.score - a.score).map((l) => (
+                      {[...vm.leads].sort(compareLeadsByPipelinePriority).map((l) => (
                         <option key={l.id} value={l.id}>
                           {l.fullName} · score {l.score} · {l.email}
                         </option>
