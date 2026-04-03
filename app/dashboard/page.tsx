@@ -40,6 +40,7 @@ export default async function DashboardPage() {
       initialOutreachDryRunEnvDefault={data.outreachDryRunEnvDefault ?? data.outreachDryRun ?? true}
       initialOutreachDryRunOverride={data.outreachDryRunOverride ?? null}
       initialOutreachTestToActive={data.outreachTestToActive ?? false}
+      initialAutoDailyFirstTouchEnabled={data.autoDailyFirstTouchEnabled ?? false}
       initialNotifications={data.notifications ?? []}
       initialVoiceTrainingNotes={data.voiceTrainingNotes ?? []}
       importSummary={importSummary}

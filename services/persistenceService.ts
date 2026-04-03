@@ -313,7 +313,8 @@ export const getDashboardData = async () => {
     outreachDryRun: dryRunState.effective,
     outreachDryRunEnvDefault: dryRunState.envDefault,
     outreachDryRunOverride: dryRunState.override,
-    outreachTestToActive
+    outreachTestToActive,
+    autoDailyFirstTouchEnabled: dryRunState.autoDailyFirstTouchEnabled
   };
 };
 

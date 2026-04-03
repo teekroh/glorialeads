@@ -20,6 +20,7 @@ export type OutreachDryRunDashboardState = {
   envDefault: boolean;
   override: boolean | null;
   effective: boolean;
+  autoDailyFirstTouchEnabled: boolean;
 };
 
 export async function getOutreachDryRunDashboardState(): Promise<OutreachDryRunDashboardState> {
@@ -27,14 +28,28 @@ export async function getOutreachDryRunDashboardState(): Promise<OutreachDryRunD
   const row = await db.dashboardRuntimeConfig.findUnique({ where: { id: SINGLETON_ID } });
   const override = row?.outreachDryRunOverride ?? null;
   const effective = override !== null ? override : envDefault;
-  return { envDefault, override, effective };
+  return {
+    envDefault,
+    override,
+    effective,
+    autoDailyFirstTouchEnabled: row?.autoDailyFirstTouchEnabled ?? false
+  };
 }
 
 /** Persist override (true/false) or null to follow `DRY_RUN` env again. */
 export async function setOutreachDryRunOverride(override: boolean | null): Promise<void> {
   await db.dashboardRuntimeConfig.upsert({
     where: { id: SINGLETON_ID },
-    create: { id: SINGLETON_ID, outreachDryRunOverride: override },
+    create: { id: SINGLETON_ID, outreachDryRunOverride: override, autoDailyFirstTouchEnabled: false },
     update: { outreachDryRunOverride: override }
+  });
+}
+
+/** Morning auto-send pool (cron + dashboard toggle). */
+export async function setAutoDailyFirstTouchEnabled(enabled: boolean): Promise<void> {
+  await db.dashboardRuntimeConfig.upsert({
+    where: { id: SINGLETON_ID },
+    create: { id: SINGLETON_ID, outreachDryRunOverride: null, autoDailyFirstTouchEnabled: enabled },
+    update: { autoDailyFirstTouchEnabled: enabled }
   });
 }

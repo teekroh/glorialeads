@@ -35,6 +35,8 @@ export interface Filters {
   addressBand: AddressConfidenceBand | "all";
   addressConfidenceMin: string;
   addressConfidenceMax: string;
+  /** Lead library: hide rows already in an active campaign (status In Campaign). */
+  hideInCampaignAlready: boolean;
 }
 
 export const defaultLeadFilters: Filters = {
@@ -49,7 +51,8 @@ export const defaultLeadFilters: Filters = {
   addressQuick: "all",
   addressBand: "all",
   addressConfidenceMin: "",
-  addressConfidenceMax: ""
+  addressConfidenceMax: "",
+  hideInCampaignAlready: false
 };
 
 function numericAddressScore(lead: Lead): number | null {
@@ -71,7 +74,8 @@ export const useDashboard = (
   initialOutreachDryRunOverride: boolean | null = null,
   initialNotifications: DashboardNotificationDTO[] = [],
   initialVoiceTrainingNotes: VoiceTrainingNoteDTO[] = [],
-  initialOutreachTestToActive = false
+  initialOutreachTestToActive = false,
+  initialAutoDailyFirstTouchEnabled = false
 ) => {
   const adminApiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? "";
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
@@ -85,6 +89,10 @@ export const useDashboard = (
   const [outreachDryRunOverride, setOutreachDryRunOverrideState] = useState<boolean | null>(initialOutreachDryRunOverride);
   const [dryRunToggleBusy, setDryRunToggleBusy] = useState(false);
   const [outreachTestToActive, setOutreachTestToActive] = useState(initialOutreachTestToActive);
+  const [autoDailyFirstTouchEnabled, setAutoDailyFirstTouchEnabledState] = useState(
+    initialAutoDailyFirstTouchEnabled
+  );
+  const [autoDailyFirstTouchBusy, setAutoDailyFirstTouchBusy] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultLeadFilters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
@@ -132,6 +140,9 @@ export const useDashboard = (
       setOutreachDryRunOverrideState(data.outreachDryRunOverride);
     }
     if (typeof data.outreachTestToActive === "boolean") setOutreachTestToActive(data.outreachTestToActive);
+    if (typeof data.autoDailyFirstTouchEnabled === "boolean") {
+      setAutoDailyFirstTouchEnabledState(data.autoDailyFirstTouchEnabled);
+    }
     if (Array.isArray(data.notifications)) {
       setNotifications(data.notifications as DashboardNotificationDTO[]);
     }
@@ -154,6 +165,7 @@ export const useDashboard = (
       if (filters.source !== "all" && lead.source !== filters.source) return false;
       if (filters.leadType !== "all" && lead.leadType !== filters.leadType) return false;
       if (filters.priorityTier !== "all" && lead.priorityTier !== filters.priorityTier) return false;
+      if (filters.hideInCampaignAlready && lead.status === "In Campaign") return false;
       if (filters.status !== "all" && lead.status !== filters.status) return false;
       if (filters.projectTier !== "all" && lead.estimatedProjectTier !== filters.projectTier) return false;
       if (lead.distanceMinutes > filters.maxDistance) return false;
@@ -507,6 +519,25 @@ export const useDashboard = (
     };
   };
 
+  const setAutoDailyFirstTouchMode = async (enabled: boolean) => {
+    setAutoDailyFirstTouchBusy(true);
+    try {
+      const res = await fetch("/api/settings/auto-daily-first-touch", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(adminApiKey ? { "x-api-key": adminApiKey } : {})
+        },
+        body: JSON.stringify({ enabled })
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      await refresh();
+      return { ok: res.ok && data.ok !== false, error: data.error, status: res.status };
+    } finally {
+      setAutoDailyFirstTouchBusy(false);
+    }
+  };
+
   const createLead = async (payload: CreateManualLeadPayload) => {
     const res = await fetch("/api/leads", {
       method: "POST",
@@ -596,6 +627,9 @@ export const useDashboard = (
     outreachDryRunEnvDefault,
     outreachDryRunOverride,
     outreachTestToActive,
+    autoDailyFirstTouchEnabled,
+    autoDailyFirstTouchBusy,
+    setAutoDailyFirstTouchMode,
     dryRunToggleBusy,
     setOutreachDryRunMode,
     filtered,

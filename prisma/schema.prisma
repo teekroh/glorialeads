@@ -147,9 +147,11 @@ model VoiceTrainingNote {
  * when true/false, overrides env for all outreach sends (email + owner notify + calendar auto-book).
  */
 model DashboardRuntimeConfig {
-  id                     String   @id
-  outreachDryRunOverride Boolean?
-  updatedAt              DateTime @updatedAt
+  id                           String   @id
+  outreachDryRunOverride       Boolean?
+  /** When true, cron may send first-touch batches on business mornings (see autoDailyFirstTouch service). */
+  autoDailyFirstTouchEnabled   Boolean  @default(false)
+  updatedAt                    DateTime @updatedAt
 }
 
 /** In-app activity feed (meetings, auto-replies, scheduled sends). */

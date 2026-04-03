@@ -44,6 +44,13 @@ import { SourceBadge } from "@/components/ui/SourceBadge";
 import { BookingStatusBadge, StatusBadge } from "@/components/ui/StatusBadge";
 import { GloriaDialogProvider, useGloriaDialogs } from "@/components/ui/GloriaDialogs";
 
+/** Lead library ✓ colors: yellow = verify-approved pool; green = first touch / in campaign. */
+function leadLibraryVerifyCheck(lead: Lead): "green" | "yellow" | null {
+  if (lead.outreachHistory.length > 0 || lead.status === "In Campaign") return "green";
+  if (lead.deployVerifyVerdict === "approved") return "yellow";
+  return null;
+}
+
 const MANUAL_LEAD_TYPES: LeadType[] = [
   "homeowner",
   "designer",
@@ -700,6 +707,7 @@ function DashboardAppInner({
   initialNotifications = [],
   initialVoiceTrainingNotes = [],
   initialOutreachTestToActive = false,
+  initialAutoDailyFirstTouchEnabled = false,
   importSummary
 }: {
   initialLeads: Lead[];
@@ -715,6 +723,7 @@ function DashboardAppInner({
   initialNotifications?: DashboardNotificationDTO[];
   initialVoiceTrainingNotes?: VoiceTrainingNoteDTO[];
   initialOutreachTestToActive?: boolean;
+  initialAutoDailyFirstTouchEnabled?: boolean;
   importSummary: ImportSummary;
 }) {
   const vm = useDashboard(
@@ -730,7 +739,8 @@ function DashboardAppInner({
     initialOutreachDryRunOverride ?? null,
     initialNotifications,
     initialVoiceTrainingNotes,
-    initialOutreachTestToActive
+    initialOutreachTestToActive,
+    initialAutoDailyFirstTouchEnabled
   );
 
   const { alert: gloriaAlert, confirm: gloriaConfirm } = useGloriaDialogs();
@@ -1209,6 +1219,45 @@ function DashboardAppInner({
                 Use .env only
               </button>
             ) : null}
+            <div className="mt-3 border-t border-white/15 pt-3 text-[11px] text-stone-300">
+              <label className="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-amber-400"
+                  checked={vm.autoDailyFirstTouchEnabled}
+                  disabled={vm.autoDailyFirstTouchBusy}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    void (async () => {
+                      if (on) {
+                        const ok = await gloriaConfirm(
+                          "Each business day between 8:00 and 10:00 (BUSINESS_TIMEZONE / server), automatically launch one batch of first-touch emails for Verify-approved leads who have never received a first touch. Uses the same limits as manual launch (DAILY_SEND_LIMIT, CAMPAIGN_SEND_LIMIT, address floors, pacing). Respects dry run when it is on. Requires Vercel cron hitting /api/cron/auto-daily-first-touch with CRON_SECRET.",
+                          "Enable morning auto-send?"
+                        );
+                        if (!ok) return;
+                      } else {
+                        const ok = await gloriaConfirm("Turn off automatic morning first-touch sends?", "Auto-send");
+                        if (!ok) return;
+                      }
+                      const r = await vm.setAutoDailyFirstTouchMode(on);
+                      if (!r.ok) {
+                        void gloriaAlert(r.error ?? "Could not save setting.", "Auto-send");
+                      }
+                    })();
+                  }}
+                />
+                <span>
+                  <span className="font-medium text-stone-200">Auto morning send</span>
+                  <span className="mt-0.5 block text-[10px] text-stone-400">
+                    Verified pool only · never contacted · cron every 15m (runs inside 8–10 AM window only)
+                  </span>
+                </span>
+              </label>
+              <p className="mt-2 text-[10px] leading-snug text-stone-500">
+                Gmail may file cold outreach under <strong className="text-stone-300">Promotions</strong> — improving domain auth (SPF/DKIM), reply-to, and
+                content helps Primary placement; that is separate from this toggle.
+              </p>
+            </div>
           </div>
         </aside>
 
@@ -1443,6 +1492,23 @@ function DashboardAppInner({
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
+                        className={`shrink-0 rounded-lg border px-4 py-2 text-sm font-medium ${
+                          vm.filters.hideInCampaignAlready
+                            ? "border-amber-400/80 bg-amber-50 text-amber-950"
+                            : "border-slate-300 bg-white text-brand-ink hover:bg-slate-50"
+                        }`}
+                        onClick={() =>
+                            vm.setFilters((f) => ({
+                              ...f,
+                              hideInCampaignAlready: !f.hideInCampaignAlready
+                            }))
+                          }
+                        title="Hide leads whose status is already In Campaign"
+                      >
+                        {vm.filters.hideInCampaignAlready ? "Excluding in-campaign ✓" : "Exclude in-campaign"}
+                      </button>
+                      <button
+                        type="button"
                         className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-slate-50"
                         onClick={exportData}
                       >
@@ -1585,7 +1651,9 @@ function DashboardAppInner({
                       </tr>
                     </thead>
                     <tbody>
-                      {vm.filtered.map((lead) => (
+                      {vm.filtered.map((lead) => {
+                        const verifyMark = leadLibraryVerifyCheck(lead);
+                        return (
                         <tr
                           key={lead.id}
                           className="cursor-pointer border-t hover:bg-slate-50"
@@ -1607,10 +1675,17 @@ function DashboardAppInner({
                           </td>
                           <td className="p-2">
                             <p className="flex items-center gap-1.5 font-medium text-brand-ink">
-                              {lead.deployVerifyVerdict === "approved" ? (
+                              {verifyMark === "green" ? (
                                 <span
                                   className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold leading-none text-white"
-                                  title="Verify approved — OK to include in campaign (address rules still apply)"
+                                  title="First touch sent or In Campaign — green verify / pipeline"
+                                >
+                                  ✓
+                                </span>
+                              ) : verifyMark === "yellow" ? (
+                                <span
+                                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[11px] font-bold leading-none text-amber-950"
+                                  title="Verify approved — not yet in campaign (auto-send or manual launch eligible)"
                                 >
                                   ✓
                                 </span>
@@ -1654,7 +1729,8 @@ function DashboardAppInner({
                           <td className="p-2">{lead.priorityTier}</td>
                           <td className="p-2">{lead.distanceMinutes} min</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1680,8 +1756,9 @@ function DashboardAppInner({
                         Edit lead
                       </h3>
                       <p className="mt-1 text-xs text-slate-600">
-                        Same fields as the Verify tab. Fit score recomputes from lead type and email. Green Verify ✓ (if any) is{" "}
-                        <strong>not</strong> changed here — use Verify to approve or reject.
+                        Same fields as the Verify tab. Fit score recomputes from lead type and email. Library checkmarks:{" "}
+                        <strong>yellow ✓</strong> = verify-approved, not sent yet; <strong>green ✓</strong> = first touch / In Campaign. Approve/reject only
+                        in Verify.
                       </p>
                       <div className="mt-4">
                         <LeadProfileForm value={libraryEditDraft} onChange={setLibraryEditDraft} />
