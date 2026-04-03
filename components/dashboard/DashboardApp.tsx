@@ -1126,12 +1126,12 @@ function DashboardAppInner({
   return (
     <div className="min-h-screen">
       <div className="grid min-h-screen grid-cols-[250px_1fr]">
-        <aside className="flex min-h-screen flex-col border-r border-white/10 bg-brand-ink p-4 text-stone-100">
-          <div className="mb-6 flex items-center justify-center gap-2 px-1">
+        <aside className="sticky top-0 flex h-screen max-h-screen flex-col overflow-hidden border-r border-white/10 bg-brand-ink p-4 text-stone-100">
+          <div className="mb-6 flex shrink-0 items-center justify-center gap-2 px-1">
             <img src="/gloria-logo.svg" alt="" className="h-11 w-auto shrink-0 max-w-[100px] opacity-95" aria-hidden />
             <span className="font-semibold tracking-tight text-xl text-stone-100">Gloria Leads</span>
           </div>
-          <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto text-sm">
+          <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain text-sm">
             {SIDEBAR_VIEWS.map((v) => (
               <button
                 key={v}
@@ -1152,7 +1152,7 @@ function DashboardAppInner({
             ))}
           </nav>
           <div
-            className="mt-4 border-t border-white/15 pt-3 text-[11px] text-stone-300"
+            className="mt-4 shrink-0 border-t border-white/15 pt-3 text-[11px] text-stone-300"
             title={
               `${vm.outreachDryRun ? "Dry run — Resend does not deliver outreach." : "Live — Resend delivers real mail."} .env DRY_RUN default: ${vm.outreachDryRunEnvDefault ? "on" : "off"}.` +
               (vm.outreachDryRunOverride === null
