@@ -19,9 +19,6 @@ import {
 } from "@/components/ui/AddressConfidenceBadge";
 import { getCampaignSequencePreview, renderFirstTouchForLead } from "@/services/messagingService";
 import {
-  addressConfidenceBand,
-  campaignSendEligibility,
-  leadNeedsLowAddressConfirm,
   outreachReadiness,
   OUTREACH_ADDRESS_MIN_DEFAULT,
   OUTREACH_ADDRESS_VERY_POOR_MAX
@@ -807,9 +804,6 @@ function DashboardAppInner({
     setSimulationLeadId(top?.id ?? null);
   }, [vm.leads, simulationLeadId]);
   const [campaignName, setCampaignName] = useState("Kitchen Intro Sprint");
-  const [campaignIncludeBelow71, setCampaignIncludeBelow71] = useState(false);
-  const [campaignIncludeVeryPoor, setCampaignIncludeVeryPoor] = useState(false);
-  const [campaignConfirmLow, setCampaignConfirmLow] = useState(false);
   const [campaignOverrideVerify, setCampaignOverrideVerify] = useState(false);
   const [activeView, setActiveView] = useState<(typeof SIDEBAR_VIEWS)[number]>("dashboard");
   const [dashboardTab, setDashboardTab] = useState<"active" | "in_campaign" | "lost">("active");
@@ -914,87 +908,12 @@ function DashboardAppInner({
     return { lead, rendered: renderFirstTouchForLead(lead, bookingLinkPreview) };
   }, [selectedLeads, bookingLinkPreview]);
 
-  const launchAddressOpts = useMemo(
-    () => ({
-      includeBelowOutreachMin: campaignIncludeBelow71,
-      includeVeryPoorAddress: campaignIncludeVeryPoor,
-      confirmLowAddressRisk: campaignConfirmLow,
-      includeUnverifiedHighScore: campaignOverrideVerify
-    }),
-    [campaignIncludeBelow71, campaignIncludeVeryPoor, campaignConfirmLow, campaignOverrideVerify]
-  );
-
-  const campaignAddressPreview = useMemo(() => {
-    const strict = {
-      includeBelowOutreachMin: false,
-      includeVeryPoorAddress: false,
-      confirmLowAddressRisk: false
-    };
-    const bands = { strong: 0, good: 0, caution: 0, weak: 0, poor: 0, unknown: 0 };
-    let excludedByDefault = 0;
-    let excludedVeryPoor = 0;
-    const riskyWithNotes: { id: string; name: string; score: number | null; notes: string }[] = [];
-    for (const lead of selectedLeads) {
-      bands[addressConfidenceBand(lead.addressConfidence)] += 1;
-      const eligStrict = campaignSendEligibility(lead, strict);
-      if (!eligStrict.eligible) {
-        if (eligStrict.reason === "very_poor_address") excludedVeryPoor += 1;
-        else excludedByDefault += 1;
-      }
-      const s = lead.addressConfidence;
-      const n = s === null || s === undefined || Number.isNaN(s) ? null : Math.round(s);
-      if ((n === null || n < OUTREACH_ADDRESS_MIN_DEFAULT) && lead.confidenceNotes?.trim()) {
-        riskyWithNotes.push({
-          id: lead.id,
-          name: lead.fullName,
-          score: n,
-          notes: lead.confidenceNotes.trim()
-        });
-      }
-    }
-    const wouldSendNow = selectedLeads.filter((l) => isEligibleForCampaignSend(l, launchAddressOpts)).length;
-    const needsConfirmEstimate = selectedLeads.filter((l) => {
-      if (!isEligibleForCampaignSend(l, launchAddressOpts)) return false;
-      const v = l.addressConfidence;
-      const nn = v === null || v === undefined || Number.isNaN(v) ? null : Math.round(v);
-      return nn === null || nn <= 50;
-    }).length;
-    return {
-      bands,
-      excludedByDefault,
-      excludedVeryPoor,
-      riskyWithNotes,
-      wouldSendNow,
-      needsConfirmEstimate
-    };
-  }, [selectedLeads, launchAddressOpts]);
-
-  const lowAddressInSelection = useMemo(
+  const verifySendableCount = useMemo(
     () =>
-      selectedLeads.some((l) => {
-        const v = l.addressConfidence;
-        if (v === null || v === undefined || Number.isNaN(v)) return true;
-        return Math.round(v) < OUTREACH_ADDRESS_MIN_DEFAULT;
-      }),
-    [selectedLeads]
-  );
-
-  const veryPoorInSelection = useMemo(
-    () =>
-      selectedLeads.some((l) => {
-        const v = l.addressConfidence;
-        if (v === null || v === undefined || Number.isNaN(v)) return false;
-        return Math.round(v) <= OUTREACH_ADDRESS_VERY_POOR_MAX;
-      }),
-    [selectedLeads]
-  );
-
-  const selectionNeedsLowAddressConfirm = useMemo(
-    () =>
-      selectedLeads.some(
-        (l) => isEligibleForCampaignSend(l, launchAddressOpts) && leadNeedsLowAddressConfirm(l)
-      ),
-    [selectedLeads, launchAddressOpts]
+      selectedLeads.filter((l) =>
+        isEligibleForCampaignSend(l, { includeUnverifiedHighScore: campaignOverrideVerify })
+      ).length,
+    [selectedLeads, campaignOverrideVerify]
   );
 
   /** Leads without Verify ✓ (null or rejected) — rejected still cannot send even with override. */
@@ -1533,12 +1452,14 @@ function DashboardAppInner({
                             void gloriaAlert("Select one or more leads in the table (checkboxes) before launching.", "Launch campaign");
                             return;
                           }
-                          const data = await vm.launchCampaign(campaignName, launchAddressOpts);
+                          const data = await vm.launchCampaign(campaignName, {
+                            includeUnverifiedHighScore: campaignOverrideVerify
+                          });
                           if (data && "ok" in data && data.ok && data.result) {
                             const r = data.result;
                             void gloriaAlert(
                               `${r.dryRun ? "Dry run" : "Live send"} complete: ${r.sentCount} sent · limit skips ${r.skippedByLimit} · ` +
-                                `addr policy ${r.skippedByAddressPolicy} · very poor ${r.skippedVeryPoor} · verify gate ${r.skippedByDeployVerify ?? 0} · DNC ${r.skippedDoNotContact}`,
+                                `verify gate ${r.skippedByDeployVerify ?? 0} · DNC ${r.skippedDoNotContact}`,
                               "Campaign sent"
                             );
                           } else if (data && "ok" in data && !data.ok) {
@@ -1887,47 +1808,8 @@ function DashboardAppInner({
                   </div>
                 ) : null}
 
-                {lowAddressInSelection && !campaignIncludeBelow71 ? (
-                  <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                    Selection includes leads with address confidence under {OUTREACH_ADDRESS_MIN_DEFAULT} or unknown scores. They are{" "}
-                    <strong>excluded by default</strong>. Check <strong>Include &lt;71 addresses</strong> to allow them (very poor ≤{OUTREACH_ADDRESS_VERY_POOR_MAX}{" "}
-                    also needs its checkbox).
-                  </div>
-                ) : null}
-                {veryPoorInSelection && campaignIncludeBelow71 && !campaignIncludeVeryPoor ? (
-                  <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                    Selection includes very poor addresses (≤{OUTREACH_ADDRESS_VERY_POOR_MAX}). Enable <strong>Include very poor addresses</strong> to send to those
-                    rows.
-                  </div>
-                ) : null}
-                {selectionNeedsLowAddressConfirm && !campaignConfirmLow ? (
-                  <div className="mt-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-950">
-                    Some selected leads have address confidence ≤50 or unknown. Check <strong>I confirm low / unknown address risk</strong> before launch.
-                  </div>
-                ) : null}
-
                 <div className="mt-3 flex flex-col gap-2 border-t pt-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <input className="rounded border p-2 text-sm" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} />
-                  <label className="flex items-center gap-2 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={campaignIncludeBelow71}
-                      onChange={(e) => setCampaignIncludeBelow71(e.target.checked)}
-                    />
-                    Include &lt;71 address scores (override default)
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={campaignIncludeVeryPoor}
-                      onChange={(e) => setCampaignIncludeVeryPoor(e.target.checked)}
-                    />
-                    Include very poor addresses (≤10)
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-700">
-                    <input type="checkbox" checked={campaignConfirmLow} onChange={(e) => setCampaignConfirmLow(e.target.checked)} />
-                    I confirm low / unknown address risk (≤50)
-                  </label>
                   <label className="flex items-center gap-2 text-xs text-amber-900">
                     <input
                       type="checkbox"
@@ -1949,37 +1831,15 @@ function DashboardAppInner({
 
                 {selectedLeads.length > 0 ? (
                   <div className="mt-3 rounded border border-slate-200 bg-white p-3 text-xs text-slate-700">
-                    <p className="font-semibold text-brand-ink">Campaign · address selection summary</p>
+                    <p className="font-semibold text-brand-ink">Campaign · send eligibility summary</p>
                     <p className="mt-1">
-                      Bands: strong {campaignAddressPreview.bands.strong} · good {campaignAddressPreview.bands.good} · caution{" "}
-                      {campaignAddressPreview.bands.caution} · weak {campaignAddressPreview.bands.weak} · poor {campaignAddressPreview.bands.poor} · unknown{" "}
-                      {campaignAddressPreview.bands.unknown}
-                    </p>
-                    <p className="mt-1">
-                      Excluded by default (need &lt;71 override): {campaignAddressPreview.excludedByDefault} · excluded very poor (≤10, need checkbox):{" "}
-                      {campaignAddressPreview.excludedVeryPoor} · would send with current checkboxes: {campaignAddressPreview.wouldSendNow}{" "}
+                      Would send with current settings: {verifySendableCount}{" "}
                       (every lead needs Verify ✓ before send unless you use the override)
                     </p>
                     {unapprovedVerifyInSelection > 0 && !campaignOverrideVerify ? (
                       <p className="mt-1 text-amber-900">
                         Verify: {unapprovedVerifyInSelection} selected lead(s) without green ✓ — they will be skipped unless you override.
                       </p>
-                    ) : null}
-                    <p className="mt-1 text-amber-900">
-                      If launch includes scores ≤50 (or unknown), check the confirmation box ({campaignAddressPreview.needsConfirmEstimate} lead(s) may need
-                      it).
-                    </p>
-                    {campaignAddressPreview.riskyWithNotes.length ? (
-                      <div className="mt-2 border-t border-slate-100 pt-2">
-                        <p className="font-medium text-brand-ink/90">Confidence notes (under {OUTREACH_ADDRESS_MIN_DEFAULT} or unknown)</p>
-                        <ul className="mt-1 max-h-32 space-y-1 overflow-y-auto">
-                          {campaignAddressPreview.riskyWithNotes.map((x) => (
-                            <li key={x.id}>
-                              <span className="font-medium">{x.name}</span> ({x.score ?? "—"}) — {x.notes}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
                     ) : null}
                   </div>
                 ) : null}

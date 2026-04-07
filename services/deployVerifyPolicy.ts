@@ -33,7 +33,7 @@ export function deployVerifySendGate(
   return null;
 }
 
-/** Verify gate + address/outreach rules — use for campaign preview and launch. */
+/** Verify gate + DNC check (address gating removed) — use for campaign preview and launch. */
 export function isEligibleForCampaignSend(lead: Lead, opts: LaunchCampaignOptions): boolean {
   const g = deployVerifySendGate(lead, opts);
   if (g && !g.eligible) return false;

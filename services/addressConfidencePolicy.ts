@@ -16,13 +16,13 @@ function classificationForLeadType(leadType: LeadType): FirstTouchClassification
   }
 }
 
-/** Default outreach floor: leads below this are skipped unless `includeBelowOutreachMin`. */
+/** Historical outreach floor used for dashboards/readiness messaging. */
 export const OUTREACH_ADDRESS_MIN_DEFAULT = 71;
 
-/** Leads at or below this need `includeVeryPoorAddress` to send. */
+/** Historical "very poor" cutoff used for dashboards/readiness messaging. */
 export const OUTREACH_ADDRESS_VERY_POOR_MAX = 10;
 
-/** At or below this score requires `confirmLowAddressRisk` when included in a campaign (&lt; 51). */
+/** Historical low-risk cutoff used for dashboards/readiness messaging. */
 export const OUTREACH_ADDRESS_LOW_RISK_MAX = 50;
 
 export type AddressConfidenceBand = "strong" | "good" | "caution" | "weak" | "poor" | "unknown";
@@ -61,12 +61,6 @@ export function addressScoreForPolicy(lead: Pick<Lead, "addressConfidence">): nu
 }
 
 export type LaunchCampaignOptions = {
-  /** Include leads with address score &lt; 71 (and ≥ 11 unless `includeVeryPoorAddress`). */
-  includeBelowOutreachMin?: boolean;
-  /** Allow address score ≤ 10. */
-  includeVeryPoorAddress?: boolean;
-  /** Required when any launched lead has address &lt; 51. */
-  confirmLowAddressRisk?: boolean;
   /** Skip Verify-tab approval for all leads on campaign launch (use with extreme care). */
   includeUnverifiedHighScore?: boolean;
 };
@@ -76,39 +70,25 @@ export type EligibilityResult = {
   reason?: string;
 };
 
-/** Whether a lead may be sent in a campaign under the given options. */
+/** Campaign address policy is disabled; only DNC can block here. */
 export function campaignSendEligibility(
   lead: Pick<Lead, "doNotContact" | "addressConfidence">,
-  opts: LaunchCampaignOptions
+  _opts: LaunchCampaignOptions
 ): EligibilityResult {
   if (lead.doNotContact) return { eligible: false, reason: "do_not_contact" };
-  const v = lead.addressConfidence;
-  if (v === null || v === undefined || Number.isNaN(v)) {
-    if (!opts.includeBelowOutreachMin) return { eligible: false, reason: "below_outreach_min" };
-    return { eligible: true };
-  }
-  const s = Math.min(100, Math.max(0, Math.round(v)));
-  if (s <= OUTREACH_ADDRESS_VERY_POOR_MAX && !opts.includeVeryPoorAddress) {
-    return { eligible: false, reason: "very_poor_address" };
-  }
-  if (s < OUTREACH_ADDRESS_MIN_DEFAULT && !opts.includeBelowOutreachMin) {
-    return { eligible: false, reason: "below_outreach_min" };
-  }
   return { eligible: true };
 }
 
-/** True if this lead requires `confirmLowAddressRisk` when included in a send batch. */
+/** Address risk confirm is disabled. */
 export function leadNeedsLowAddressConfirm(lead: Pick<Lead, "addressConfidence">): boolean {
-  const s = addressScoreForPolicy(lead);
-  if (s < 0) return true;
-  return s <= OUTREACH_ADDRESS_LOW_RISK_MAX;
+  void lead;
+  return false;
 }
 
 export function needsLowAddressConfirmInBatch(leads: Lead[], opts: LaunchCampaignOptions): boolean {
-  return leads.some((lead) => {
-    if (!campaignSendEligibility(lead, opts).eligible) return false;
-    return leadNeedsLowAddressConfirm(lead);
-  });
+  void leads;
+  void opts;
+  return false;
 }
 
 /** Readable outreach readiness (does not replace business score). */

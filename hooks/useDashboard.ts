@@ -256,9 +256,6 @@ export const useDashboard = (
       body: JSON.stringify({
         name,
         leadIds: selectedIds,
-        includeBelowOutreachMin: options?.includeBelowOutreachMin,
-        includeVeryPoorAddress: options?.includeVeryPoorAddress,
-        confirmLowAddressRisk: options?.confirmLowAddressRisk,
         includeUnverifiedHighScore: options?.includeUnverifiedHighScore
       })
     });

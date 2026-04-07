@@ -10,9 +10,6 @@ export async function POST(request: Request) {
   const name = String(payload.name || "Campaign");
   const leadIds = Array.isArray(payload.leadIds) ? payload.leadIds : [];
   const options: LaunchCampaignOptions = {
-    includeBelowOutreachMin: Boolean(payload.includeBelowOutreachMin),
-    includeVeryPoorAddress: Boolean(payload.includeVeryPoorAddress),
-    confirmLowAddressRisk: Boolean(payload.confirmLowAddressRisk),
     includeUnverifiedHighScore: Boolean(payload.includeUnverifiedHighScore)
   };
   const result = await launchCampaign(name, leadIds, options);

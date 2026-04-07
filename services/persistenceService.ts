@@ -23,10 +23,9 @@ import { pipelineStatusForTier, scoreLeadBase } from "@/services/scoringService"
 import type { CreateManualLeadPayload, Lead, LeadStatus } from "@/types/lead";
 import {
   campaignSendEligibility,
-  needsLowAddressConfirmInBatch,
   type LaunchCampaignOptions
 } from "@/services/addressConfidencePolicy";
-import { deployVerifySendGate, isEligibleForCampaignSend } from "@/services/deployVerifyPolicy";
+import { deployVerifySendGate } from "@/services/deployVerifyPolicy";
 import { listVoiceTrainingNotes } from "@/services/voiceTrainingStorage";
 import { getEffectiveOutreachDryRun, getOutreachDryRunDashboardState } from "@/services/outreachDryRunService";
 import {
@@ -329,7 +328,7 @@ export type LaunchCampaignResult = {
   skippedByDeployVerify: number;
   dryRun: boolean;
   error?: string;
-  errorCode?: "CONFIRM_LOW_ADDRESS_REQUIRED" | "NO_LEADS_SELECTED";
+  errorCode?: "NO_LEADS_SELECTED";
 };
 
 export const launchCampaign = async (
@@ -342,9 +341,6 @@ export const launchCampaign = async (
   const dryRunEffective = await getEffectiveOutreachDryRun();
 
   const opts: LaunchCampaignOptions = {
-    includeBelowOutreachMin: Boolean(options.includeBelowOutreachMin),
-    includeVeryPoorAddress: Boolean(options.includeVeryPoorAddress),
-    confirmLowAddressRisk: Boolean(options.confirmLowAddressRisk),
     includeUnverifiedHighScore: Boolean(options.includeUnverifiedHighScore)
   };
 
@@ -367,29 +363,6 @@ export const launchCampaign = async (
 
   const leadRows = await db.lead.findMany({ where: { id: { in: uniqueIds } } });
   const byId = new Map(leadRows.map((r) => [r.id, r]));
-  const selectedDtos = uniqueIds.flatMap((id) => {
-    const row = byId.get(id);
-    return row ? [mapDbLeadToLead(row)] : [];
-  });
-
-  const eligibleForConfirmCheck = selectedDtos.filter((l) => isEligibleForCampaignSend(l, opts));
-  if (needsLowAddressConfirmInBatch(eligibleForConfirmCheck, opts) && !opts.confirmLowAddressRisk) {
-    return {
-      ok: false,
-      errorCode: "CONFIRM_LOW_ADDRESS_REQUIRED",
-      error:
-        "One or more leads have address confidence ≤ 50 (or unknown). Enable the low-address confirmation to proceed.",
-      campaignId: "",
-      sentCount: 0,
-      skippedByLimit: 0,
-      skippedByAddressPolicy: 0,
-      skippedVeryPoor: 0,
-      skippedDoNotContact: 0,
-      skippedByDeployVerify: 0,
-      dryRun: dryRunEffective
-    };
-  }
-
   const now = new Date();
   const campaignId = uid();
   await db.campaign.create({

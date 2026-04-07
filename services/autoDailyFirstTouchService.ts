@@ -5,17 +5,13 @@ import { mapDbLeadToLead } from "@/lib/mappers";
 import type { LaunchCampaignOptions } from "@/services/addressConfidencePolicy";
 import { launchCampaign, type LaunchCampaignResult } from "@/services/persistenceService";
 import { isEligibleForCampaignSend } from "@/services/deployVerifyPolicy";
-import { leadNeedsLowAddressConfirm } from "@/services/addressConfidencePolicy";
 import { compareLeadsForLibrary } from "@/services/scoringService";
 import type { Lead } from "@/types/lead";
 
 const RUNTIME_ID = "default";
 
-/** Conservative: default outreach floor, no very poor, no unverified, no low-address batch without UI confirm. */
+/** Auto-send policy: require Verify approval, no override. */
 export const AUTO_DAILY_LAUNCH_OPTS: LaunchCampaignOptions = {
-  includeBelowOutreachMin: false,
-  includeVeryPoorAddress: false,
-  confirmLowAddressRisk: false,
   includeUnverifiedHighScore: false
 };
 
@@ -47,11 +43,7 @@ export async function findEligibleAutoDailyLeadIds(): Promise<string[]> {
   const dtos: Lead[] = rows
     .filter((r) => !touched.has(r.id))
     .map((r) => mapDbLeadToLead(r))
-    .filter((lead) => {
-      if (!isEligibleForCampaignSend(lead, AUTO_DAILY_LAUNCH_OPTS)) return false;
-      if (leadNeedsLowAddressConfirm(lead)) return false;
-      return true;
-    });
+    .filter((lead) => isEligibleForCampaignSend(lead, AUTO_DAILY_LAUNCH_OPTS));
 
   dtos.sort(compareLeadsForLibrary);
   return dtos.map((l) => l.id);
