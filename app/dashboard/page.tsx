@@ -1,5 +1,6 @@
 import { DashboardApp } from "@/components/dashboard/DashboardApp";
 import { getLeadImportSummaryForDashboard } from "@/data/importLeads";
+import { getBootstrapData } from "@/lib/bootstrapData";
 import { getDashboardData } from "@/services/persistenceService";
 
 // Vercel build was failing during "Collecting page data" because this page is runtime-data dependent.
@@ -7,8 +8,45 @@ import { getDashboardData } from "@/services/persistenceService";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const data = await getDashboardData();
-  const importSummary = getLeadImportSummaryForDashboard();
+  let data: Awaited<ReturnType<typeof getDashboardData>>;
+  let importSummary = getLeadImportSummaryForDashboard();
+  try {
+    data = await getDashboardData();
+  } catch (error) {
+    console.error("[dashboard] Falling back to bootstrap data:", error);
+    const bootstrap = getBootstrapData();
+    importSummary = bootstrap.importSummary;
+    data = {
+      leads: bootstrap.leads,
+      campaigns: [],
+      notifications: [],
+      voiceTrainingNotes: [],
+      messageCount: 0,
+      followUps: [],
+      bookings: [],
+      inboundReplies: [],
+      inboxThreads: [],
+      phase3Metrics: {
+        repliesReceived: 0,
+        positiveReplies: 0,
+        bookingInvitesSent: 0,
+        bookedMeetings: 0,
+        notInterested: 0,
+        unsubscribes: 0,
+        replyRateBySource: {},
+        replyRateByLeadType: {},
+        bookingRateByTier: {}
+      },
+      bookingLinkConfigured: false,
+      bookingLinkDisplay: "",
+      bookingReplyPreview: "",
+      outreachDryRun: true,
+      outreachDryRunEnvDefault: true,
+      outreachDryRunOverride: null,
+      outreachTestToActive: false,
+      autoDailyFirstTouchEnabled: false
+    };
+  }
   return (
     <DashboardApp
       initialLeads={data.leads}
